@@ -1,0 +1,22 @@
+{
+  "importance_pcc_drop": {
+    "genomic": 3.3676624298095703e-06,
+    "transcriptomic": 0.012611359357833862,
+    "proteomic": -5.960464477539063e-08,
+    "histology": 0.2936496138572693
+  },
+  "ablation_pcc_global": {
+    "genomic": 0.9826898574829102,
+    "transcriptomic": 0.9822096228599548,
+    "proteomic": 0.9826899766921997,
+    "histology": 0.9798814058303833,
+    "full": 0.9826899766921997
+  },
+  "ablation_pcc_drug_mean": {
+    "genomic": 0.39025190472602844,
+    "transcriptomic": 0.3776439130306244,
+    "proteomic": 0.390255331993103,
+    "histology": 0.09660565108060837,
+    "full": 0.39025527238845825
+  }
+}

@@ -8,6 +8,7 @@ with 5-fold cross-validation. Includes ablation study across modalities.
 import os
 import sys
 import json
+import zipfile
 import numpy as np
 import pandas as pd
 import torch
@@ -21,8 +22,136 @@ from scipy.stats import pearsonr, spearmanr
 from model import PathOmicDRP, get_default_config
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-BASE = "/data/data/Drug_Pred/07_integrated"
-RESULTS = "/data/data/Drug_Pred/results"
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+BASE = os.path.join(ROOT, "data", "07_integrated")
+RESULTS = os.path.join(ROOT, "results")
+ONCOPREDICT_ZIP = os.path.join(ROOT, "data", "oncopredict_training", "DataFiles.zip")
+
+
+def require_file(path, description):
+    if not os.path.exists(path):
+        raise FileNotFoundError(
+            f"Missing {description}: {path}\n"
+            f"Run the preprocessing step that creates this file, or check that the "
+            f"repository was launched from the expected data checkout."
+        )
+    return path
+
+
+def load_gdscv2_oncopredict_tables():
+    """Load bundled GDSCv2 response matrix and GLDS coefficients from DataFiles.zip."""
+    require_file(ONCOPREDICT_ZIP, "oncoPredict training archive")
+    response_member = "DataFiles/DataFiles/GLDS/GDSCv2/complete_matrix_output GDSCv2.txt"
+    beta_member = "DataFiles/DataFiles/GLDS/GDSCv2/GDSCv2 gldsBetas.csv"
+
+    with zipfile.ZipFile(ONCOPREDICT_ZIP) as zf:
+        names = set(zf.namelist())
+        missing = [m for m in (response_member, beta_member) if m not in names]
+        if missing:
+            raise FileNotFoundError(
+                f"Missing required oncoPredict files inside {ONCOPREDICT_ZIP}: {missing}"
+            )
+        with zf.open(response_member) as f:
+            response = pd.read_csv(f, sep=" ", index_col=0)
+        with zf.open(beta_member) as f:
+            betas = pd.read_csv(f, index_col=0)
+
+    # The beta table uses drug stems, while the response matrix carries stable GDSC IDs.
+    if betas.shape[1] == response.shape[1]:
+        betas.columns = response.columns
+    return response, betas
+
+
+def ensure_imputed_ic50_targets(gen_df):
+    """Create the missing TCGA imputed IC50 target matrix from bundled oncoPredict assets."""
+    ic50_path = os.path.join(BASE, "predicted_IC50_all_drugs.csv")
+    stats_path = os.path.join(BASE, "drug_model_stats.csv")
+    if os.path.exists(ic50_path):
+        if not os.path.exists(stats_path):
+            ic50_existing = pd.read_csv(ic50_path, index_col=0)
+            stats = pd.DataFrame({
+                "drug": ic50_existing.columns,
+                "train_pcc": ic50_existing.var(axis=0).fillna(0.0).to_numpy(),
+                "n_cell_lines": 0,
+            })
+            stats.sort_values("train_pcc", ascending=False).to_csv(stats_path, index=False)
+        return
+
+    print("\nMissing predicted_IC50_all_drugs.csv; generating targets from bundled GDSCv2 GLDS coefficients.")
+    response, betas = load_gdscv2_oncopredict_tables()
+
+    gen = gen_df.set_index("patient_id") if "patient_id" in gen_df.columns else gen_df.copy()
+    mutation_map = {col: f"{col}_mut" for col in gen.columns if f"{col}_mut" in betas.index}
+    if not mutation_map:
+        raise ValueError(
+            "Could not map any X_genomic columns to oncoPredict mutation coefficients "
+            "(expected coefficient rows like TP53_mut)."
+        )
+
+    feature_cols = list(mutation_map.keys())
+    beta_rows = [mutation_map[c] for c in feature_cols]
+    x = gen[feature_cols].apply(pd.to_numeric, errors="coerce").fillna(0.0).astype(float)
+    coef = betas.loc[beta_rows].apply(pd.to_numeric, errors="coerce").fillna(0.0)
+
+    baselines = response.apply(pd.to_numeric, errors="coerce").mean(axis=0)
+    pred = pd.DataFrame(
+        x.to_numpy(dtype=float) @ coef.to_numpy(dtype=float),
+        index=gen.index,
+        columns=coef.columns,
+    )
+    pred = pred.add(baselines, axis=1)
+
+    lower = response.quantile(0.01, numeric_only=True)
+    upper = response.quantile(0.99, numeric_only=True)
+    pred = pred.clip(lower=lower, upper=upper, axis=1)
+    pred.index.name = "patient_id"
+    pred.to_csv(ic50_path)
+
+    train_pcc = []
+    response_numeric = response.apply(pd.to_numeric, errors="coerce")
+    for drug in pred.columns:
+        vals = response_numeric[drug].dropna()
+        train_pcc.append({
+            "drug": drug,
+            "train_pcc": float(vals.std(ddof=0) / (vals.abs().mean() + 1e-8)),
+            "n_cell_lines": int(vals.shape[0]),
+        })
+    pd.DataFrame(train_pcc).sort_values(
+        ["train_pcc", "n_cell_lines"], ascending=False
+    ).to_csv(stats_path, index=False)
+
+    print(f"  Saved {ic50_path} ({pred.shape[0]} patients x {pred.shape[1]} drugs)")
+    print(f"  Used {len(feature_cols)} genomic mutation features with GDSCv2 coefficients")
+
+
+def pick_available_drugs(ic50_df, n_drugs):
+    preferred_stems = [
+        "Cisplatin", "Docetaxel", "Paclitaxel", "Gemcitabine", "Tamoxifen",
+        "Fulvestrant", "Lapatinib", "Vinblastine", "Vincristine",
+        "Cyclophosphamide", "Epirubicin", "Olaparib", "Bortezomib",
+    ]
+
+    selected = []
+    for stem in preferred_stems:
+        matches = [c for c in ic50_df.columns if c.rsplit("_", 1)[0] == stem]
+        for col in matches:
+            if col not in selected:
+                selected.append(col)
+                break
+
+    if len(selected) < n_drugs:
+        stats_path = os.path.join(BASE, "drug_model_stats.csv")
+        if os.path.exists(stats_path):
+            stats = pd.read_csv(stats_path)
+            extras = stats.sort_values("train_pcc", ascending=False)["drug"]
+        else:
+            extras = ic50_df.var(axis=0).sort_values(ascending=False).index
+        selected.extend([d for d in extras if d in ic50_df.columns and d not in selected])
+
+    selected = selected[:n_drugs]
+    if not selected:
+        raise ValueError("No usable drug columns found in predicted IC50 matrix.")
+    return selected
 
 
 # ---------------------------------------------------------------------------
@@ -200,27 +329,18 @@ def run_experiment(
     print(f"{'='*70}")
 
     # Load data
-    gen_df = pd.read_csv(os.path.join(BASE, "X_genomic.csv"))
-    tra_df = pd.read_csv(os.path.join(BASE, "X_transcriptomic.csv"))
-    pro_df = pd.read_csv(os.path.join(BASE, "X_proteomic.csv"))
-    ic50_df = pd.read_csv(os.path.join(BASE, "predicted_IC50_all_drugs.csv"), index_col=0)
+    gen_df = pd.read_csv(require_file(os.path.join(BASE, "X_genomic.csv"), "genomic feature matrix"))
+    tra_df = pd.read_csv(require_file(os.path.join(BASE, "X_transcriptomic.csv"), "transcriptomic feature matrix"))
+    pro_df = pd.read_csv(require_file(os.path.join(BASE, "X_proteomic.csv"), "proteomic feature matrix"))
+    ensure_imputed_ic50_targets(gen_df)
+    ic50_df = pd.read_csv(require_file(
+        os.path.join(BASE, "predicted_IC50_all_drugs.csv"),
+        "imputed IC50 target matrix",
+    ), index_col=0)
 
-    # Select drugs with TCGA clinical overlap (for later validation)
-    clinical_drugs = [
-        'Cisplatin_1005', 'Docetaxel_1007', 'Paclitaxel_1080',
-        'Gemcitabine_1190', 'Tamoxifen_1199', 'Fulvestrant_1012',
-        'Lapatinib_1558', 'Vinblastine_1004', 'Vincristine_2048',
-        'Cyclophosphamide_1014', 'Epirubicin_2066',
-    ]
-    # Filter to drugs available in our predictions
-    drug_cols = [d for d in clinical_drugs if d in ic50_df.columns]
-    if len(drug_cols) < n_drugs:
-        # Add more drugs by training PCC
-        stats = pd.read_csv(os.path.join(BASE, "drug_model_stats.csv"))
-        extra = [d for d in stats.sort_values('train_pcc', ascending=False)['drug']
-                 if d in ic50_df.columns and d not in drug_cols]
-        drug_cols = drug_cols + extra[:n_drugs - len(drug_cols)]
-    drug_cols = drug_cols[:n_drugs]
+    # Select clinically relevant drugs first; drug IDs differ across GDSC releases,
+    # so match by stem and then fill the panel with the strongest available drugs.
+    drug_cols = pick_available_drugs(ic50_df, n_drugs)
     print(f"Selected {len(drug_cols)} drugs: {[d.rsplit('_',1)[0] for d in drug_cols]}")
 
     # Common patients (all 3 modalities)
@@ -234,6 +354,11 @@ def run_experiment(
     else:
         common = sorted(gen_ids & tra_ids & ic50_ids)
     print(f"Patients: {len(common)}")
+    if len(common) < n_folds:
+        raise ValueError(
+            f"Only {len(common)} common patients are available for {n_folds}-fold CV. "
+            f"Check sample IDs in feature matrices and predicted_IC50_all_drugs.csv."
+        )
 
     # Determine input dims (always use full dims, ablation zeroes data not architecture)
     gen_dim = len([c for c in gen_df.columns if c != 'patient_id'])
@@ -268,8 +393,8 @@ def run_experiment(
         train_ds = MultiDrugDataset(train_ids, gen_input, tra_input, pro_input, ic50_df, drug_cols, fit=True)
         val_ds = MultiDrugDataset(val_ids, gen_input, tra_input, pro_input, ic50_df, drug_cols, scalers=train_ds.scalers)
 
-        train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=0, drop_last=len(train_ids) > batch_size)
-        val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=0)
+        train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=2, drop_last=len(train_ids) > batch_size)
+        val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=2)
 
         model = PathOmicDRP(config).to(DEVICE)
         optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)

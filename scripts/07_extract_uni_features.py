@@ -27,16 +27,17 @@ import timm
 from huggingface_hub import hf_hub_download
 
 # ─── Config ───────────────────────────────────────────────────────────
-WSI_DIR = "/data/data/Drug_Pred/05_morphology/wsi"
-TARGET_CSV = "/data/data/Drug_Pred/05_morphology/wsi_target_3modal.csv"
-OUT_DIR = "/data/data/Drug_Pred/05_morphology/features"
-LOG_FILE = "/data/data/Drug_Pred/logs/uni_feature_extraction.log"
+WSI_DIR = "./data/05_morphology/wsi"
+TARGET_CSV = "./data/05_morphology/wsi_target_3modal.csv"
+OUT_DIR = "./data/05_morphology/features"
+LOG_FILE = "./data/logs/uni_feature_extraction.log"
 
 PATCH_SIZE = 256
 TARGET_MAG = 20
 UNI_INPUT = 224
 TISSUE_THRESH = 0.7
 BRIGHTNESS_THRESH = 220
+COMPLETE_RATIO = 0.99
 
 
 def log(msg):
@@ -45,6 +46,13 @@ def log(msg):
         f.write(line + "\n")
     sys.stdout.write(line + "\n")
     sys.stdout.flush()
+
+
+def is_complete_file(path, expected_mb):
+    if not os.path.exists(path):
+        return False
+    actual_mb = os.path.getsize(path) / (1024**2)
+    return actual_mb >= expected_mb * COMPLETE_RATIO
 
 
 # ─── Patch extraction (runs in worker processes) ─────────────────────
@@ -137,6 +145,40 @@ def main():
     log(f"Device: {device} | batch_size: {args.batch_size} | "
         f"extract_workers: {args.extract_workers} | prefetch: {args.prefetch}")
 
+    # ── Load target list and keep only complete patient slide sets ──
+    with open(TARGET_CSV) as f:
+        rows = list(csv.DictReader(f))
+
+    patient_rows = defaultdict(list)
+    for r in rows:
+        patient_rows[r["patient_id"]].append(r)
+
+    patient_slides = {}
+    incomplete = []
+    for pid, slide_rows in patient_rows.items():
+        complete_slides = []
+        for r in slide_rows:
+            svs_path = os.path.join(WSI_DIR, r["file_name"])
+            if is_complete_file(svs_path, float(r["file_size_MB"])):
+                complete_slides.append(svs_path)
+
+        if len(complete_slides) == len(slide_rows):
+            patient_slides[pid] = complete_slides
+        else:
+            incomplete.append((pid, len(complete_slides), len(slide_rows)))
+
+    done = {f.replace(".pt", "") for f in os.listdir(OUT_DIR) if f.endswith(".pt")}
+    todo_items = [(pid, slides) for pid, slides in patient_slides.items() if pid not in done]
+    log(f"Target patients: {len(patient_rows)}, complete slide sets: {len(patient_slides)}, "
+        f"incomplete/skipped: {len(incomplete)}, done: {len(done)}, remaining: {len(todo_items)}")
+    if incomplete:
+        examples = ", ".join(f"{pid}({have}/{total})" for pid, have, total in incomplete[:5])
+        log(f"Incomplete examples: {examples}")
+
+    if not todo_items:
+        log("Nothing to do!")
+        return
+
     # ── Load UNI model ──
     log("Loading UNI model...")
     weights_path = hf_hub_download("MahmoodLab/uni", filename="pytorch_model.bin")
@@ -162,24 +204,6 @@ def main():
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
     ])
-
-    # ── Load target list ──
-    with open(TARGET_CSV) as f:
-        rows = list(csv.DictReader(f))
-
-    patient_slides = defaultdict(list)
-    for r in rows:
-        svs_path = os.path.join(WSI_DIR, r["file_name"])
-        if os.path.exists(svs_path):
-            patient_slides[r["patient_id"]].append(svs_path)
-
-    done = {f.replace(".pt", "") for f in os.listdir(OUT_DIR) if f.endswith(".pt")}
-    todo_items = [(pid, slides) for pid, slides in patient_slides.items() if pid not in done]
-    log(f"Total: {len(patient_slides)}, done: {len(done)}, remaining: {len(todo_items)}")
-
-    if not todo_items:
-        log("Nothing to do!")
-        return
 
     # ── Prefetch + GPU pipeline ──
     # Use ProcessPoolExecutor for CPU-bound patch extraction

@@ -27,21 +27,25 @@ Output
   results/cptac_validation/summary.json
 """
 import os, sys, json, time
+from pathlib import Path
 import numpy as np, pandas as pd, torch
 from scipy.stats import spearmanr, mannwhitneyu, pearsonr
 
-sys.path.insert(0, '/data/data/Drug_Pred/src')
+PROJECT_ROOT = Path(os.environ.get("BRCA_DRUG_PRED_ROOT", Path(__file__).resolve().parents[1])).resolve()
+DATA_ROOT = Path(os.environ.get("BRCA_DRUG_PRED_DATA_ROOT", PROJECT_ROOT / "data")).resolve()
+
+sys.path.insert(0, str(PROJECT_ROOT / "src"))
 from model import PathOmicDRP, get_default_config
 from train_phase3_4modal import MultiDrugDataset4Modal, collate_4modal
 from sklearn.preprocessing import StandardScaler
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-TCGA = "/data/data/Drug_Pred/07_integrated"
-HISTO_DIR = "/data/data/Drug_Pred/05_morphology/features"
-FOLDS = "/data/data/Drug_Pred/results/reinforce"
-CPTAC = "/data/data/Drug_Pred/10_cptac"
-OOF_DIR = "/data/data/Drug_Pred/results/oof"
-OUT = "/data/data/Drug_Pred/results/cptac_validation"
+TCGA = DATA_ROOT / "07_integrated"
+HISTO_DIR = DATA_ROOT / "05_morphology" / "features"
+FOLDS = PROJECT_ROOT / "results" / "reinforce"
+CPTAC = DATA_ROOT / "10_cptac"
+OOF_DIR = PROJECT_ROOT / "results" / "oof"
+OUT = PROJECT_ROOT / "results" / "cptac_validation"
 os.makedirs(OUT, exist_ok=True)
 
 DRUGS = [

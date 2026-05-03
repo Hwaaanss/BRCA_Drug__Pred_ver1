@@ -9,14 +9,16 @@ Figures:
   FigS21_cptac_drug_correlation.pdf — CPTAC vs TCGA drug-drug correlation scatter
 """
 import os, json
+from pathlib import Path
 import numpy as np, pandas as pd
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 plt.rcParams.update({'font.size': 9, 'pdf.fonttype': 42, 'ps.fonttype': 42})
 
-ROOT = "/data/data/Drug_Pred_BRCA"
-OUT = f"{ROOT}/research/figures/figures_v8"
+PROJECT_ROOT = Path(os.environ.get("BRCA_DRUG_PRED_ROOT", Path(__file__).resolve().parents[1])).resolve()
+ROOT = PROJECT_ROOT
+OUT = PROJECT_ROOT / "research" / "figures" / "figures_v8"
 os.makedirs(OUT, exist_ok=True)
 
 

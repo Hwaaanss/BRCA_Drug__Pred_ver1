@@ -6,10 +6,11 @@ W1: Expanded clinical validation + Permutation test + Bootstrap CIs
 W2: Self-Attention Only model retrained at 100 epochs + clinical AUC extraction
 W3: Histopathology value via clinical AUC comparison (3-modal vs 4-modal)
 
-All results saved to /data/data/Drug_Pred/results/strengthening/
+All results saved to results/strengthening/
 """
 
 import os, sys, json, time, warnings, traceback
+from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
@@ -23,16 +24,19 @@ from scipy.stats import pearsonr, mannwhitneyu
 from itertools import combinations
 
 warnings.filterwarnings('ignore')
-sys.path.insert(0, '/data/data/Drug_Pred/src')
+PROJECT_ROOT = Path(os.environ.get("BRCA_DRUG_PRED_ROOT", Path(__file__).resolve().parents[1])).resolve()
+DATA_ROOT = Path(os.environ.get("BRCA_DRUG_PRED_DATA_ROOT", PROJECT_ROOT / "data")).resolve()
+
+sys.path.insert(0, str(PROJECT_ROOT / "src"))
 from model import PathOmicDRP, get_default_config
 from architecture_comparison import SelfAttnOnly
 from train_phase3_4modal import MultiDrugDataset4Modal, collate_4modal
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-BASE = "/data/data/Drug_Pred"
-HISTO_DIR = f"{BASE}/05_morphology/features"
-RESULTS_DIR = f"{BASE}/results/strengthening"
-FIG_DIR = f"{BASE}/research/figures/figures_v3"
+BASE = PROJECT_ROOT
+HISTO_DIR = DATA_ROOT / "05_morphology" / "features"
+RESULTS_DIR = PROJECT_ROOT / "results" / "strengthening"
+FIG_DIR = PROJECT_ROOT / "research" / "figures" / "figures_v3"
 os.makedirs(RESULTS_DIR, exist_ok=True)
 os.makedirs(FIG_DIR, exist_ok=True)
 

@@ -3,8 +3,9 @@
 import pandas as pd
 import os
 
-OUT_DIR = "/data/data/Drug_Pred/07_integrated"
-GDSC_DIR = "/data/data/Drug_Pred/06_drug_response/gdsc"
+OUT_DIR = "./data/07_integrated"
+GDSC_DIR = "./data/06_drug_response/gdsc"
+os.makedirs(OUT_DIR, exist_ok=True)
 
 # Read GDSC1 and GDSC2
 print("Reading GDSC data...")

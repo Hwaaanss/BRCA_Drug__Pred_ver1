@@ -2,8 +2,9 @@
 """Download TCGA-BRCA RNA-seq gene expression data from GDC."""
 import requests, json, os, gzip, shutil
 
-OUT_DIR = "/data/data/Drug_Pred/03_transcriptomic"
+OUT_DIR = "./data/03_transcriptomic"
 BASE = "https://api.gdc.cancer.gov"
+os.makedirs(OUT_DIR, exist_ok=True)
 
 # Query for STAR-Counts (current GDC pipeline)
 filters = {

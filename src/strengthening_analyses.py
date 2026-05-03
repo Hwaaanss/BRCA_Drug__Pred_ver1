@@ -6,6 +6,7 @@ CV-averaged ablation, and phenotype-drug sensitivity analyses.
 """
 
 import os, sys, json, time, warnings, traceback
+from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
@@ -20,12 +21,15 @@ import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 
 warnings.filterwarnings('ignore')
-sys.path.insert(0, '/data/data/Drug_Pred/src')
+PROJECT_ROOT = Path(os.environ.get("BRCA_DRUG_PRED_ROOT", Path(__file__).resolve().parents[1])).resolve()
+DATA_ROOT = Path(os.environ.get("BRCA_DRUG_PRED_DATA_ROOT", PROJECT_ROOT / "data")).resolve()
 
-BASE = "/data/data/Drug_Pred"
-HISTO_DIR = f"{BASE}/05_morphology/features"
-RESULTS_DIR = f"{BASE}/results/strengthening"
-FIG_DIR = f"{BASE}/research/figures/figures_v3"
+sys.path.insert(0, str(PROJECT_ROOT / "src"))
+
+BASE = PROJECT_ROOT
+HISTO_DIR = DATA_ROOT / "05_morphology" / "features"
+RESULTS_DIR = PROJECT_ROOT / "results" / "strengthening"
+FIG_DIR = PROJECT_ROOT / "research" / "figures" / "figures_v3"
 os.makedirs(RESULTS_DIR, exist_ok=True)
 os.makedirs(FIG_DIR, exist_ok=True)
 

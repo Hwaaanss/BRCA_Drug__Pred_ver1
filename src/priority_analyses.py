@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Priority analyses: Statistical tests, METABRIC validation, SOTA comparison, Multi-task cleanup"""
 import os, sys, json, time, warnings, traceback
+from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
@@ -15,13 +16,22 @@ from sklearn.metrics import r2_score
 from scipy.stats import pearsonr, spearmanr, wilcoxon, ttest_rel
 
 warnings.filterwarnings('ignore')
-sys.path.insert(0, '/data/data/Drug_Pred/src')
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+BASE = Path(os.environ.get("BRCA_DRUG_PRED_ROOT", PROJECT_ROOT)).resolve()
+DATA_ROOT = Path(os.environ.get("BRCA_DRUG_PRED_DATA_ROOT", BASE / "data")).resolve()
+if not (DATA_ROOT / "07_integrated").exists() and (BASE / "07_integrated").exists():
+    DATA_ROOT = BASE
+
+RESULTS_DIR = BASE / "results"
+INTEGRATED_DIR = DATA_ROOT / "07_integrated"
+HISTO_DIR = DATA_ROOT / "05_morphology" / "features"
+
+sys.path.insert(0, str(BASE / "src"))
 from model import PathOmicDRP
 from train_phase3_4modal import MultiDrugDataset4Modal, collate_4modal
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-BASE = "/data/data/Drug_Pred"
-HISTO_DIR = f"{BASE}/05_morphology/features"
 
 def log(msg):
     print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
@@ -31,12 +41,12 @@ def log(msg):
 # ═══════════════════════════════════════════════════
 def priority1():
     log("═══ PRIORITY 1: Statistical Tests ═══")
-    out_dir = f"{BASE}/results/priority1_statistical_tests"
+    out_dir = RESULTS_DIR / "priority1_statistical_tests"
     os.makedirs(out_dir, exist_ok=True)
 
-    with open(f"{BASE}/results/phase3_3modal_baseline/cv_results.json") as f:
+    with open(RESULTS_DIR / "phase3_3modal_baseline" / "cv_results.json") as f:
         r3 = json.load(f)
-    with open(f"{BASE}/results/phase3_4modal_full/cv_results.json") as f:
+    with open(RESULTS_DIR / "phase3_4modal_full" / "cv_results.json") as f:
         r4 = json.load(f)
 
     drugs = r4['drugs']
@@ -120,22 +130,22 @@ def priority1():
 # ═══════════════════════════════════════════════════
 def priority2():
     log("═══ PRIORITY 2: External Validation (METABRIC) ═══")
-    out_dir = f"{BASE}/results/priority2_metabric"
+    out_dir = RESULTS_DIR / "priority2_metabric"
     os.makedirs(out_dir, exist_ok=True)
 
     # Check if METABRIC data exists; if not, download via cBioPortal or use alternative
     # Alternative: use GDSC cell lines as external validation
     # We have GDSC IC50 matrix — use it as ground truth
 
-    gdsc_ic50 = pd.read_csv(f"{BASE}/07_integrated/GDSC_BRCA_IC50_matrix.csv", index_col=0)
+    gdsc_ic50 = pd.read_csv(INTEGRATED_DIR / "GDSC_BRCA_IC50_matrix.csv", index_col=0)
     log(f"  GDSC IC50 matrix: {gdsc_ic50.shape} (cell lines × drugs)")
 
     # Strategy: Train oncoPredict-style model on TCGA, predict GDSC cell line IC50
     # Compare PathOmicDRP representation vs simple expression-based prediction
 
     # Load TCGA data
-    tcga_expr = pd.read_csv(f"{BASE}/07_integrated/X_transcriptomic.csv").set_index('patient_id')
-    tcga_ic50 = pd.read_csv(f"{BASE}/07_integrated/predicted_IC50_all_drugs.csv", index_col=0)
+    tcga_expr = pd.read_csv(INTEGRATED_DIR / "X_transcriptomic.csv").set_index('patient_id')
+    tcga_ic50 = pd.read_csv(INTEGRATED_DIR / "predicted_IC50_all_drugs.csv", index_col=0)
 
     # For external validation, we need to show that our model's predictions
     # correlate with known biological ground truths in independent data
@@ -152,7 +162,7 @@ def priority2():
     log(f"  GDSC drugs available: {gdsc_ic50.shape[1]}")
 
     # Map our 13 drugs to GDSC drug columns
-    with open(f"{BASE}/results/phase3_4modal_full/cv_results.json") as f:
+    with open(RESULTS_DIR / "phase3_4modal_full" / "cv_results.json") as f:
         cv = json.load(f)
     our_drugs = cv['drugs']  # e.g., 'Docetaxel_1007'
 
@@ -244,19 +254,19 @@ def priority2():
 # ═══════════════════════════════════════════════════
 def priority3():
     log("═══ PRIORITY 3: SOTA DL Comparison ═══")
-    out_dir = f"{BASE}/results/priority3_sota_comparison"
+    out_dir = RESULTS_DIR / "priority3_sota_comparison"
     os.makedirs(out_dir, exist_ok=True)
 
     # Load data
-    with open(f"{BASE}/results/phase3_4modal_full/cv_results.json") as f:
+    with open(RESULTS_DIR / "phase3_4modal_full" / "cv_results.json") as f:
         cv = json.load(f)
     drug_cols = cv['drugs']
     drug_names = [d.rsplit('_',1)[0] for d in drug_cols]
 
-    gen_df = pd.read_csv(f"{BASE}/07_integrated/X_genomic.csv")
-    tra_df = pd.read_csv(f"{BASE}/07_integrated/X_transcriptomic.csv")
-    pro_df = pd.read_csv(f"{BASE}/07_integrated/X_proteomic.csv")
-    ic50_df = pd.read_csv(f"{BASE}/07_integrated/predicted_IC50_all_drugs.csv", index_col=0)
+    gen_df = pd.read_csv(INTEGRATED_DIR / "X_genomic.csv")
+    tra_df = pd.read_csv(INTEGRATED_DIR / "X_transcriptomic.csv")
+    pro_df = pd.read_csv(INTEGRATED_DIR / "X_proteomic.csv")
+    ic50_df = pd.read_csv(INTEGRATED_DIR / "predicted_IC50_all_drugs.csv", index_col=0)
 
     hids = {f.replace('.pt','') for f in os.listdir(HISTO_DIR) if f.endswith('.pt')}
     common = sorted(set(gen_df['patient_id'])&set(tra_df['patient_id'])&set(pro_df['patient_id'])&set(ic50_df.index)&hids)
@@ -339,9 +349,9 @@ def priority3():
         log(f"  {method_name:20s} | G+T+P PCC_drug={method_results['Gen+Trans+Prot']['pcc_drug'][0]:.4f}")
 
     # Add our model results
-    with open(f"{BASE}/results/phase3_3modal_baseline/cv_results.json") as f:
+    with open(RESULTS_DIR / "phase3_3modal_baseline" / "cv_results.json") as f:
         r3 = json.load(f)
-    with open(f"{BASE}/results/phase3_4modal_full/cv_results.json") as f:
+    with open(RESULTS_DIR / "phase3_4modal_full" / "cv_results.json") as f:
         r4 = json.load(f)
 
     results['PathOmicDRP'] = {
@@ -379,7 +389,7 @@ def priority4():
     log("═══ PRIORITY 4: Multi-task Reclassification ═══")
     # This is a manuscript edit task, not analysis
     # Just document the decision
-    out_dir = f"{BASE}/results/priority4_manuscript_edits"
+    out_dir = RESULTS_DIR / "priority4_manuscript_edits"
     os.makedirs(out_dir, exist_ok=True)
 
     edits = {
@@ -427,7 +437,7 @@ if __name__ == '__main__':
     except Exception as e:
         log(f"P4 FAILED: {e}"); traceback.print_exc()
 
-    with open(f"{BASE}/results/priority_results.json", 'w') as f:
+    with open(RESULTS_DIR / "priority_results.json", 'w') as f:
         json.dump(ALL, f, indent=2, default=str)
 
     log("\n═══ ALL PRIORITY ANALYSES COMPLETE ═══")

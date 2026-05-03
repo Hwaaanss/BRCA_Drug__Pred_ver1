@@ -8,6 +8,7 @@ Extends Phase 2 by adding UNI-extracted H&E features via ABMIL.
 import os
 import sys
 import json
+from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
@@ -21,9 +22,12 @@ from scipy.stats import pearsonr, spearmanr
 from model import PathOmicDRP, get_default_config
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-BASE = "/data/data/Drug_Pred/07_integrated"
-HISTO_DIR = "/data/data/Drug_Pred/05_morphology/features"
-RESULTS = "/data/data/Drug_Pred/results"
+PROJECT_ROOT = Path(os.environ.get("BRCA_DRUG_PRED_ROOT", Path(__file__).resolve().parents[2])).resolve()
+FINAL_ROOT = PROJECT_ROOT / "FINAL"
+DATA_ROOT = Path(os.environ.get("BRCA_DRUG_PRED_DATA_ROOT", PROJECT_ROOT / "data")).resolve()
+BASE = DATA_ROOT / "07_integrated"
+HISTO_DIR = DATA_ROOT / "05_morphology" / "features"
+RESULTS = FINAL_ROOT / "results"
 
 
 class MultiDrugDataset4Modal(Dataset):

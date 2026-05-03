@@ -3,8 +3,9 @@
 import os, gzip, glob, csv
 from collections import defaultdict
 
-MAF_DIR = "/data/data/Drug_Pred/02_genomic/mutations"
-OUT_DIR = "/data/data/Drug_Pred/07_integrated"
+MAF_DIR = "./data/02_genomic/mutations"
+OUT_DIR = "./data/07_integrated"
+os.makedirs(OUT_DIR, exist_ok=True)
 
 # Parse all MAF files
 print("Parsing MAF files...")

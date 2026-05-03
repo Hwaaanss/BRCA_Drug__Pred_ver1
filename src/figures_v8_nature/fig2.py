@@ -10,7 +10,7 @@ Panels:
 import os, json, numpy as np, matplotlib.pyplot as plt, matplotlib.gridspec as gs
 from scipy.stats import ttest_rel
 from . import style as S
-from .loaders import load_phase_cv, per_drug_pcc, load_advanced, short_drug, BASE
+from .loaders import load_phase_cv, per_drug_pcc, load_advanced, short_drug, DATA_ROOT
 
 
 def _fold_per_drug_means(cv):
@@ -65,7 +65,7 @@ def panel_b_scatter(ax):
     g_pcc = cv['avg']['pcc_global']['mean']
     # Pull actual from oncopredict file
     import pandas as pd
-    ic = pd.read_csv(f"{BASE}/07_integrated/predicted_IC50_all_drugs.csv", index_col=0)
+    ic = pd.read_csv(DATA_ROOT / "07_integrated" / "predicted_IC50_all_drugs.csv", index_col=0)
     drugs = cv['drugs']
     present = [d for d in drugs if d in ic.columns]
     vals = ic[present].values
@@ -227,4 +227,4 @@ def make(out_dir):
 
 
 if __name__ == '__main__':
-    make('/data/data/Drug_Pred/research/figures/figures_v8')
+    make(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'research', 'figures', 'figures_v8'))

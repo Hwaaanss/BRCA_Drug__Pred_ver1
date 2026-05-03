@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """Patch v7 with new table legends and figure legends."""
+import os
+from pathlib import Path
 from docx import Document
 
-SRC = "/data/data/Drug_Pred/research/PathOmicDRP_Full_Manuscript_v7.docx"
+PROJECT_ROOT = Path(os.environ.get("BRCA_DRUG_PRED_ROOT", Path(__file__).resolve().parents[2])).resolve()
+SRC = PROJECT_ROOT / "FINAL" / "manuscript" / "PathOmicDRP_Full_Manuscript_v7.docx"
 
 
 def add_paragraph_after(doc, anchor_substr, texts, style='Normal'):

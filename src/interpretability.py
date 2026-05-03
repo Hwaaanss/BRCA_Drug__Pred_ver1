@@ -12,6 +12,7 @@ Outputs: Figure 5 (interpretability) + supplementary figures
 import os
 import sys
 import json
+from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
@@ -29,10 +30,13 @@ from model import PathOmicDRP, get_default_config
 from train_phase3_4modal import MultiDrugDataset4Modal, collate_4modal
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-BASE = "/data/data/Drug_Pred/07_integrated"
-HISTO_DIR = "/data/data/Drug_Pred/05_morphology/features"
-RESULTS = "/data/data/Drug_Pred/results/phase3_4modal_full"
-FIG_DIR = "/data/data/Drug_Pred/research/figures"
+PROJECT_ROOT = Path(os.environ.get("BRCA_DRUG_PRED_ROOT", Path(__file__).resolve().parents[1])).resolve()
+DATA_ROOT = Path(os.environ.get("BRCA_DRUG_PRED_DATA_ROOT", PROJECT_ROOT / "data")).resolve()
+
+BASE = DATA_ROOT / "07_integrated"
+HISTO_DIR = DATA_ROOT / "05_morphology" / "features"
+RESULTS = PROJECT_ROOT / "results" / "phase3_4modal_full"
+FIG_DIR = PROJECT_ROOT / "research" / "figures"
 
 
 def load_model_and_data():
@@ -447,7 +451,7 @@ def plot_top_features(gen_attr, tra_attr, pro_attr, gen_names, tra_names, pro_na
 def plot_4modal_comparison(save_dir):
     """Figure 5C: 3-modal vs 4-modal per-drug comparison."""
     # Load both results
-    with open(os.path.join("/data/data/Drug_Pred/results/phase3_3modal_baseline", "cv_results.json")) as f:
+    with open(PROJECT_ROOT / "results" / "phase3_3modal_baseline" / "cv_results.json") as f:
         r3 = json.load(f)
     with open(os.path.join(RESULTS, "cv_results.json")) as f:
         r4 = json.load(f)

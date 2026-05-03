@@ -3,9 +3,10 @@
 import pandas as pd
 import os
 
-OUT_DIR = "/data/data/Drug_Pred/07_integrated"
-CLINICAL = "/data/data/Drug_Pred/01_clinical/TCGA_BRCA_clinical.csv"
-DRUG_TREAT = "/data/data/Drug_Pred/01_clinical/TCGA_BRCA_drug_treatments.csv"
+OUT_DIR = "./data/07_integrated"
+CLINICAL = "./data/01_clinical/TCGA_BRCA_clinical.csv"
+DRUG_TREAT = "./data/01_clinical/TCGA_BRCA_drug_treatments.csv"
+os.makedirs(OUT_DIR, exist_ok=True)
 
 print("=" * 60)
 print("MULTI-MODAL DATA HARMONIZATION")

@@ -1,7 +1,10 @@
 """Shared data loaders for v8 figures."""
 import json, os, numpy as np, pandas as pd
+from pathlib import Path
 
-BASE = "/data/data/Drug_Pred"
+PROJECT_ROOT = Path(os.environ.get("BRCA_DRUG_PRED_ROOT", Path(__file__).resolve().parents[2])).resolve()
+DATA_ROOT = Path(os.environ.get("BRCA_DRUG_PRED_DATA_ROOT", PROJECT_ROOT / "data")).resolve()
+BASE = PROJECT_ROOT
 
 def J(p):
     with open(f"{BASE}/{p}") as f: return json.load(f)
@@ -68,10 +71,10 @@ def load_cohort_sizes():
     for mod, fn in [('Genomic','X_genomic.csv'),('Transcriptomic','X_transcriptomic.csv'),
                     ('Proteomic','X_proteomic.csv')]:
         try:
-            out[mod] = sum(1 for _ in open(f"{BASE}/07_integrated/{fn}")) - 1
+            out[mod] = sum(1 for _ in open(DATA_ROOT / "07_integrated" / fn)) - 1
         except: out[mod] = 0
     try:
-        out['Histology'] = sum(1 for f in os.listdir(f"{BASE}/05_morphology/features") if f.endswith('.pt'))
+        out['Histology'] = sum(1 for f in os.listdir(DATA_ROOT / "05_morphology" / "features") if f.endswith('.pt'))
     except: out['Histology'] = 431
     out['Clinical'] = 1098
     out['Drug treatment'] = 776

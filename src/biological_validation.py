@@ -25,16 +25,20 @@ Outputs
   results/biological_validation/depmap_dependency_heatmap_data.csv
 """
 import os, json, time
+from pathlib import Path
 import numpy as np, pandas as pd
 from scipy.stats import pearsonr
 from lifelines import CoxPHFitter
 
-BASE = "/data/data/Drug_Pred/07_integrated"
-CLIN_DIR = "/data/data/Drug_Pred/01_clinical"
-OOF = "/data/data/Drug_Pred/results/oof"
-METABRIC = "/data/data/Drug_Pred/08_metabric"
-DEPMAP = "/data/data/Drug_Pred/09_depmap"
-OUT = "/data/data/Drug_Pred/results/biological_validation"
+PROJECT_ROOT = Path(os.environ.get("BRCA_DRUG_PRED_ROOT", Path(__file__).resolve().parents[1])).resolve()
+DATA_ROOT = Path(os.environ.get("BRCA_DRUG_PRED_DATA_ROOT", PROJECT_ROOT / "data")).resolve()
+
+BASE = DATA_ROOT / "07_integrated"
+CLIN_DIR = DATA_ROOT / "01_clinical"
+OOF = PROJECT_ROOT / "results" / "oof"
+METABRIC = DATA_ROOT / "08_metabric"
+DEPMAP = DATA_ROOT / "09_depmap"
+OUT = PROJECT_ROOT / "results" / "biological_validation"
 os.makedirs(OUT, exist_ok=True)
 
 DRUGS = [

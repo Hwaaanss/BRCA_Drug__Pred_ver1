@@ -10,20 +10,24 @@ Outputs
   results/oof/token_layout.json           describes which token index = which modality
 """
 import os, sys, json, time
+from pathlib import Path
 import numpy as np, pandas as pd, torch
 from torch.utils.data import DataLoader
 from sklearn.model_selection import KFold
 import torch.nn.functional as F
 
-sys.path.insert(0, '/data/data/Drug_Pred/src')
+PROJECT_ROOT = Path(os.environ.get("BRCA_DRUG_PRED_ROOT", Path(__file__).resolve().parents[1])).resolve()
+DATA_ROOT = Path(os.environ.get("BRCA_DRUG_PRED_DATA_ROOT", PROJECT_ROOT / "data")).resolve()
+
+sys.path.insert(0, str(PROJECT_ROOT / "src"))
 from model import PathOmicDRP, get_default_config
 from train_phase3_4modal import MultiDrugDataset4Modal, collate_4modal
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-BASE = "/data/data/Drug_Pred/07_integrated"
-HISTO_DIR = "/data/data/Drug_Pred/05_morphology/features"
-FOLDS_DIR = "/data/data/Drug_Pred/results/reinforce"
-OUT = "/data/data/Drug_Pred/results/oof"
+BASE = DATA_ROOT / "07_integrated"
+HISTO_DIR = DATA_ROOT / "05_morphology" / "features"
+FOLDS_DIR = PROJECT_ROOT / "results" / "reinforce"
+OUT = PROJECT_ROOT / "results" / "oof"
 os.makedirs(OUT, exist_ok=True)
 
 DRUGS = [

@@ -2,8 +2,9 @@
 """Download TCGA-BRCA RPPA proteomic data from GDC and TCPA."""
 import requests, json, os, csv
 
-OUT_DIR = "/data/data/Drug_Pred/04_proteomic"
+OUT_DIR = "./data/04_proteomic"
 BASE = "https://api.gdc.cancer.gov"
+os.makedirs(OUT_DIR, exist_ok=True)
 
 # 1. Try GDC for RPPA data
 print("=== Querying GDC for RPPA data ===")

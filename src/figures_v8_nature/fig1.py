@@ -165,4 +165,4 @@ def make(out_dir):
 
 
 if __name__ == '__main__':
-    make('/data/data/Drug_Pred/research/figures/figures_v8')
+    make(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'research', 'figures', 'figures_v8'))

@@ -14,6 +14,7 @@ Replaces Fig5A_cv_ablation, Fig9_drug_heterogeneity, FigS17_metabric_validation,
 FigS18_fair_embedding in research/figures/figures_v6/.
 """
 import os, json
+from pathlib import Path
 import numpy as np
 import pandas as pd
 import matplotlib
@@ -41,9 +42,11 @@ rcParams.update({
     'savefig.dpi': 400,
 })
 
-BASE = "/data/data/Drug_Pred"
-RES  = f"{BASE}/results/reinforce"
-FIG  = f"{BASE}/research/figures/figures_v6"
+PROJECT_ROOT = Path(os.environ.get("BRCA_DRUG_PRED_ROOT", Path(__file__).resolve().parents[2])).resolve()
+FINAL_ROOT = PROJECT_ROOT / "FINAL"
+BASE = PROJECT_ROOT
+RES = FINAL_ROOT / "results" / "reinforce"
+FIG = FINAL_ROOT / "figures" / "reinforce_v6_v7"
 
 PAL_MOA = {
     'DNA-damaging': '#c62828',

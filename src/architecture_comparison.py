@@ -12,6 +12,7 @@ Baselines:
 6. PathOmicDRP 4-modal (full, cross-attention)
 """
 import os, sys, json, time, warnings
+from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
@@ -23,13 +24,17 @@ from sklearn.preprocessing import StandardScaler
 from scipy.stats import pearsonr
 
 warnings.filterwarnings('ignore')
-sys.path.insert(0, '/data/data/Drug_Pred/src')
+PROJECT_ROOT = Path(os.environ.get("BRCA_DRUG_PRED_ROOT", Path(__file__).resolve().parents[1])).resolve()
+DATA_ROOT = Path(os.environ.get("BRCA_DRUG_PRED_DATA_ROOT", PROJECT_ROOT / "data")).resolve()
+
+sys.path.insert(0, str(PROJECT_ROOT / "src"))
 from model import PathOmicDRP, get_default_config
 from train_phase3_4modal import MultiDrugDataset4Modal, collate_4modal
 
 DEVICE = torch.device('cuda')
-BASE = "/data/data/Drug_Pred"
-HISTO_DIR = f"{BASE}/05_morphology/features"
+DATA_DIR = DATA_ROOT
+HISTO_DIR = DATA_ROOT / "05_morphology" / "features"
+RESULTS_ROOT = PROJECT_ROOT / "results"
 
 def log(msg):
     print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
@@ -277,13 +282,13 @@ def train_and_eval(model_class, model_kwargs, train_ds, val_ds, n_epochs=100, lr
 # ═══════════════════════════════════════════
 if __name__ == '__main__':
     log("Loading data...")
-    with open(f"{BASE}/results/phase3_4modal_full/cv_results.json") as f:
+    with open(RESULTS_ROOT / "phase3_4modal_full" / "cv_results.json") as f:
         cv = json.load(f)
     config = cv['config']; drug_cols = cv['drugs']
-    gen_df = pd.read_csv(f"{BASE}/07_integrated/X_genomic.csv")
-    tra_df = pd.read_csv(f"{BASE}/07_integrated/X_transcriptomic.csv")
-    pro_df = pd.read_csv(f"{BASE}/07_integrated/X_proteomic.csv")
-    ic50_df = pd.read_csv(f"{BASE}/07_integrated/predicted_IC50_all_drugs.csv", index_col=0)
+    gen_df = pd.read_csv(f"{DATA_DIR}/07_integrated/X_genomic.csv")
+    tra_df = pd.read_csv(f"{DATA_DIR}/07_integrated/X_transcriptomic.csv")
+    pro_df = pd.read_csv(f"{DATA_DIR}/07_integrated/X_proteomic.csv")
+    ic50_df = pd.read_csv(f"{DATA_DIR}/07_integrated/predicted_IC50_all_drugs.csv", index_col=0)
     hids = {f.replace('.pt','') for f in os.listdir(HISTO_DIR) if f.endswith('.pt')}
     pids = sorted(set(gen_df['patient_id'])&set(tra_df['patient_id'])&set(pro_df['patient_id'])&set(ic50_df.index)&hids)
     log(f"Patients: {len(pids)}")
@@ -349,9 +354,9 @@ if __name__ == '__main__':
         log(f"  → {model_name.replace(chr(10),' ')}: PCC_drug={np.mean(fold_drugs):.4f}±{np.std(fold_drugs):.4f} ({n_params:,} params)")
 
     # Save
-    out_dir = f"{BASE}/results/architecture_comparison"
+    out_dir = RESULTS_ROOT / "architecture_comparison"
     os.makedirs(out_dir, exist_ok=True)
-    with open(f"{out_dir}/results.json", 'w') as f:
+    with open(out_dir / "results.json", 'w') as f:
         json.dump(results, f, indent=2)
 
     log("\n═══ ARCHITECTURE COMPARISON SUMMARY ═══")

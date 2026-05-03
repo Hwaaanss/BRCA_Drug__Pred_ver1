@@ -14,13 +14,14 @@ Adds:
      (not therapeutic) clinical utility.
 """
 import os, json, shutil
+from pathlib import Path
 from docx import Document
 from copy import deepcopy
 
-BASE = "/data/data/Drug_Pred"
-RES  = f"{BASE}/results"
-SRC  = f"{BASE}/research/PathOmicDRP_Full_Manuscript_v6.docx"
-DST  = f"{BASE}/research/PathOmicDRP_Full_Manuscript_v7.docx"
+PROJECT_ROOT = Path(os.environ.get("BRCA_DRUG_PRED_ROOT", Path(__file__).resolve().parents[2])).resolve()
+RES = PROJECT_ROOT / "results"
+SRC = PROJECT_ROOT / "FINAL" / "manuscript" / "PathOmicDRP_Full_Manuscript_v6.docx"
+DST = PROJECT_ROOT / "FINAL" / "manuscript" / "PathOmicDRP_Full_Manuscript_v7.docx"
 
 
 def replace_paragraph_text(doc, old_substring, new_text, strict=False):

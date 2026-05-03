@@ -6,15 +6,18 @@ Fig 5A-revised: CV-averaged modality ablation (with 95% CIs)
 Fig S18: Fair embedding comparison across clinical drugs
 """
 import os, json
+from pathlib import Path
 import numpy as np
 import pandas as pd
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-BASE = "/data/data/Drug_Pred"
-RES  = f"{BASE}/results/reinforce"
-FIG  = f"{BASE}/research/figures/figures_v6"
+PROJECT_ROOT = Path(os.environ.get("BRCA_DRUG_PRED_ROOT", Path(__file__).resolve().parents[2])).resolve()
+FINAL_ROOT = PROJECT_ROOT / "FINAL"
+BASE = PROJECT_ROOT
+RES = FINAL_ROOT / "results" / "reinforce"
+FIG = FINAL_ROOT / "figures" / "reinforce_v6_v7"
 os.makedirs(FIG, exist_ok=True)
 
 

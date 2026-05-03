@@ -8,6 +8,7 @@ C: GDSC Real IC50 Validation (W3 strengthening)
 """
 
 import os, sys, json, time, warnings, traceback
+from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
@@ -27,16 +28,26 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 
 warnings.filterwarnings('ignore')
-sys.path.insert(0, '/data/data/Drug_Pred/src')
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+BASE = Path(os.environ.get("BRCA_DRUG_PRED_ROOT", PROJECT_ROOT)).resolve()
+DATA_ROOT = Path(os.environ.get("BRCA_DRUG_PRED_DATA_ROOT", BASE / "data")).resolve()
+if not (DATA_ROOT / "07_integrated").exists() and (BASE / "07_integrated").exists():
+    DATA_ROOT = BASE
+
+RESULTS_ROOT = BASE / "results"
+INTEGRATED_DIR = DATA_ROOT / "07_integrated"
+CLINICAL_DIR = DATA_ROOT / "01_clinical"
+HISTO_DIR = DATA_ROOT / "05_morphology" / "features"
+RESULTS_DIR = RESULTS_ROOT / "strengthening"
+FIG_DIR = BASE / "research" / "figures" / "figures_v3"
+
+sys.path.insert(0, str(BASE / "src"))
 from model import PathOmicDRP, get_default_config
 from architecture_comparison import SelfAttnOnly, EarlyFusionMLP
 from train_phase3_4modal import MultiDrugDataset4Modal, collate_4modal
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-BASE = "/data/data/Drug_Pred"
-HISTO_DIR = f"{BASE}/05_morphology/features"
-RESULTS_DIR = f"{BASE}/results/strengthening"
-FIG_DIR = f"{BASE}/research/figures/figures_v3"
 os.makedirs(RESULTS_DIR, exist_ok=True)
 os.makedirs(FIG_DIR, exist_ok=True)
 
@@ -64,21 +75,21 @@ def save_json(data, path):
 def load_data():
     """Load all data and trained PathOmicDRP model."""
     log("Loading data and model...")
-    with open(f"{BASE}/results/phase3_4modal_full/cv_results.json") as f:
+    with open(RESULTS_ROOT / "phase3_4modal_full" / "cv_results.json") as f:
         cv = json.load(f)
     config = cv['config']
     drug_cols = cv['drugs']
 
     model = PathOmicDRP(config).to(DEVICE)
-    state = torch.load(f"{BASE}/results/phase3_4modal_full/best_model.pt",
+    state = torch.load(RESULTS_ROOT / "phase3_4modal_full" / "best_model.pt",
                        map_location=DEVICE, weights_only=True)
     model.load_state_dict(state)
     model.eval()
 
-    gen_df = pd.read_csv(f"{BASE}/07_integrated/X_genomic.csv")
-    tra_df = pd.read_csv(f"{BASE}/07_integrated/X_transcriptomic.csv")
-    pro_df = pd.read_csv(f"{BASE}/07_integrated/X_proteomic.csv")
-    ic50_df = pd.read_csv(f"{BASE}/07_integrated/predicted_IC50_all_drugs.csv", index_col=0)
+    gen_df = pd.read_csv(INTEGRATED_DIR / "X_genomic.csv")
+    tra_df = pd.read_csv(INTEGRATED_DIR / "X_transcriptomic.csv")
+    pro_df = pd.read_csv(INTEGRATED_DIR / "X_proteomic.csv")
+    ic50_df = pd.read_csv(INTEGRATED_DIR / "predicted_IC50_all_drugs.csv", index_col=0)
     histo_ids = {f.replace('.pt', '') for f in os.listdir(HISTO_DIR) if f.endswith('.pt')}
     common = sorted(set(gen_df['patient_id']) & set(tra_df['patient_id']) &
                     set(pro_df['patient_id']) & set(ic50_df.index) & histo_ids)
@@ -428,7 +439,7 @@ def analysis_b(data):
 
     # --- Step 3: Load clinical treatment outcome labels ---
     log("  Loading clinical treatment data...")
-    drug_df = pd.read_csv(f"{BASE}/01_clinical/TCGA_BRCA_drug_treatments.csv")
+    drug_df = pd.read_csv(CLINICAL_DIR / "TCGA_BRCA_drug_treatments.csv")
     pid_set = set(pids)
     pid_to_idx = {p: i for i, p in enumerate(pids)}
 
@@ -615,8 +626,8 @@ def analysis_c(data):
 
     # --- Load GDSC data ---
     log("  Loading GDSC data...")
-    gdsc_ic50 = pd.read_csv(f"{BASE}/07_integrated/GDSC_BRCA_IC50_matrix.csv", index_col=0)
-    gdsc_response = pd.read_csv(f"{BASE}/07_integrated/GDSC_BRCA_drug_response.csv")
+    gdsc_ic50 = pd.read_csv(INTEGRATED_DIR / "GDSC_BRCA_IC50_matrix.csv", index_col=0)
+    gdsc_response = pd.read_csv(INTEGRATED_DIR / "GDSC_BRCA_drug_response.csv")
 
     log(f"  GDSC IC50 matrix: {gdsc_ic50.shape} (cell lines x drugs)")
     log(f"  GDSC response data: {gdsc_response.shape}")

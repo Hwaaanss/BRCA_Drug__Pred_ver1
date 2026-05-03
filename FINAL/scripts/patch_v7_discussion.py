@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Patch v7: add Discussion bridge paragraph on drug-level heterogeneity."""
 import json
+import os
+from pathlib import Path
 from docx import Document
 
-SRC = "/data/data/Drug_Pred/research/PathOmicDRP_Full_Manuscript_v7.docx"
+PROJECT_ROOT = Path(os.environ.get("BRCA_DRUG_PRED_ROOT", Path(__file__).resolve().parents[2])).resolve()
+SRC = PROJECT_ROOT / "FINAL" / "manuscript" / "PathOmicDRP_Full_Manuscript_v7.docx"
 DISC = (
     "The sharp drug-level split we observed in the fair PCA-256 comparison is, we "
     "believe, one of the more interesting practical observations of this study. It "

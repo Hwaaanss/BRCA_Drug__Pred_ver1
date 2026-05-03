@@ -36,15 +36,17 @@ New content (Genome Medicine-targeted strengthening):
 Output: research/PathOmicDRP_Full_Manuscript_v8.docx
 """
 import os, json, shutil
+from pathlib import Path
 from docx import Document
 from docx.shared import Pt, Inches
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from copy import deepcopy
 import numpy as np
 
-BASE = "/data/data/Drug_Pred"
-SRC  = f"{BASE}/research/PathOmicDRP_Full_Manuscript_v7.docx"
-DST  = f"{BASE}/research/PathOmicDRP_Full_Manuscript_v8.docx"
+PROJECT_ROOT = Path(os.environ.get("BRCA_DRUG_PRED_ROOT", Path(__file__).resolve().parents[1])).resolve()
+BASE = PROJECT_ROOT
+SRC = BASE / "research" / "PathOmicDRP_Full_Manuscript_v7.docx"
+DST = BASE / "research" / "PathOmicDRP_Full_Manuscript_v8.docx"
 
 
 def add_paragraph_after(doc, anchor_substr, texts, style=None):

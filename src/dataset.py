@@ -8,6 +8,7 @@ Handles three training scenarios:
 """
 
 import os
+from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
@@ -170,8 +171,12 @@ def collate_fn(batch):
     return result
 
 
-def load_data(base_dir: str = "/data/data/Drug_Pred/07_integrated"):
+def load_data(base_dir: str | os.PathLike | None = None):
     """Load all feature matrices and return DataFrames."""
+    if base_dir is None:
+        project_root = Path(os.environ.get("BRCA_DRUG_PRED_ROOT", Path(__file__).resolve().parents[1])).resolve()
+        data_root = Path(os.environ.get("BRCA_DRUG_PRED_DATA_ROOT", project_root / "data")).resolve()
+        base_dir = data_root / "07_integrated"
     genomic = pd.read_csv(os.path.join(base_dir, "X_genomic.csv"))
     transcriptomic = pd.read_csv(os.path.join(base_dir, "X_transcriptomic.csv"))
     proteomic = pd.read_csv(os.path.join(base_dir, "X_proteomic.csv"))

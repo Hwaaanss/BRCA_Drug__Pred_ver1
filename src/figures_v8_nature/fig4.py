@@ -12,12 +12,12 @@ from scipy.stats import spearmanr, gaussian_kde, zscore
 from scipy.cluster.hierarchy import linkage, leaves_list
 from matplotlib.patches import Rectangle
 from . import style as S
-from .loaders import load_umap_patient, BASE, DRUG_MOA, DRUG_ORDER_13
+from .loaders import load_umap_patient, DATA_ROOT, DRUG_MOA, DRUG_ORDER_13
 
 
 def _load_ic50_with_subtype():
     u = load_umap_patient()
-    ic = pd.read_csv(f"{BASE}/07_integrated/predicted_IC50_all_drugs.csv", index_col=0)
+    ic = pd.read_csv(DATA_ROOT / "07_integrated" / "predicted_IC50_all_drugs.csv", index_col=0)
     # rename IC50 columns to drug short names if needed; keep 13
     ren = {c: c.split('_')[0] for c in ic.columns}
     ic = ic.rename(columns=ren)
@@ -205,4 +205,4 @@ def make(out_dir):
 
 
 if __name__ == '__main__':
-    make('/data/data/Drug_Pred/research/figures/figures_v8')
+    make(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'research', 'figures', 'figures_v8'))

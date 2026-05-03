@@ -9,7 +9,7 @@ import os, json, numpy as np, pandas as pd, matplotlib.pyplot as plt, matplotlib
 import glob
 from scipy.stats import pearsonr
 from . import style as S
-from .loaders import load_interp, J, BASE, DRUG_MOA
+from .loaders import load_interp, J, BASE, DATA_ROOT, DRUG_MOA
 
 
 def panel_a_modality_ablation(ax):
@@ -104,7 +104,7 @@ def panel_c_delta_waterfall(ax):
 def panel_d_entropy_scatter(ax):
     """Attention entropy vs patch count — synthetic if not stored."""
     # Load patch-count from histology features
-    feat_dir = f"{BASE}/05_morphology/features"
+    feat_dir = DATA_ROOT / "05_morphology" / "features"
     try:
         import torch
         files = os.listdir(feat_dir)[:80]  # sample
@@ -173,4 +173,4 @@ def make(out_dir):
 
 
 if __name__ == '__main__':
-    make('/data/data/Drug_Pred/research/figures/figures_v8')
+    make(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'research', 'figures', 'figures_v8'))

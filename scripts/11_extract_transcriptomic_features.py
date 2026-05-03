@@ -3,9 +3,10 @@
 import os, tarfile, csv, io
 from collections import defaultdict
 
-RNASEQ_DIR = "/data/data/Drug_Pred/03_transcriptomic"
-OUT_DIR = "/data/data/Drug_Pred/07_integrated"
+RNASEQ_DIR = "./data/03_transcriptomic"
+OUT_DIR = "./data/07_integrated"
 MANIFEST = os.path.join(RNASEQ_DIR, "manifest_rnaseq.csv")
+os.makedirs(OUT_DIR, exist_ok=True)
 
 # Read manifest to map file_id -> submitter_id
 file_to_patient = {}

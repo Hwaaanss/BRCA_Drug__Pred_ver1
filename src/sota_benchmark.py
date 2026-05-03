@@ -29,6 +29,7 @@ Output:
   results/benchmark/sota_per_drug.csv
 """
 import os, sys, json, time, copy
+from pathlib import Path
 import numpy as np, pandas as pd, torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
@@ -37,13 +38,16 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import ElasticNet
 from scipy.stats import pearsonr, spearmanr
 
-sys.path.insert(0, '/data/data/Drug_Pred/src')
+PROJECT_ROOT = Path(os.environ.get("BRCA_DRUG_PRED_ROOT", Path(__file__).resolve().parents[1])).resolve()
+DATA_ROOT = Path(os.environ.get("BRCA_DRUG_PRED_DATA_ROOT", PROJECT_ROOT / "data")).resolve()
+
+sys.path.insert(0, str(PROJECT_ROOT / "src"))
 from train_phase3_4modal import MultiDrugDataset4Modal, collate_4modal
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-BASE = "/data/data/Drug_Pred/07_integrated"
-HISTO_DIR = "/data/data/Drug_Pred/05_morphology/features"
-OUT = "/data/data/Drug_Pred/results/benchmark"
+BASE = DATA_ROOT / "07_integrated"
+HISTO_DIR = DATA_ROOT / "05_morphology" / "features"
+OUT = PROJECT_ROOT / "results" / "benchmark"
 os.makedirs(OUT, exist_ok=True)
 
 DRUGS = [
@@ -342,7 +346,7 @@ def main():
 
     # Add PathOmicDRP reference (from reinforce cv_ablation.json full condition)
     try:
-        ref = json.load(open("/data/data/Drug_Pred/results/reinforce/cv_ablation.json"))
+        ref = json.load(open(PROJECT_ROOT / "results" / "reinforce" / "cv_ablation.json"))
         full = ref['aggregate']['full']
         # per_drug from per_fold full
         pdrug = np.array([f['full']['per_drug'] for f in ref['per_fold']])

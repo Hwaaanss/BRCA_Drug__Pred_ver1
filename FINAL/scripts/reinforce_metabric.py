@@ -15,16 +15,20 @@ Validation target: same Ridge model applied to z-scored METABRIC microarray.
 Output: results/reinforce/metabric_validation.json + CSV of per-patient predictions.
 """
 import os, sys, json, time
+from pathlib import Path
 import numpy as np
 import pandas as pd
 from sklearn.linear_model import Ridge
 from sklearn.preprocessing import StandardScaler
 from scipy.stats import mannwhitneyu, spearmanr, pearsonr
 
-BASE = "/data/data/Drug_Pred"
-INT = f"{BASE}/07_integrated"
-MB = f"{BASE}/08_metabric"
-OUT_DIR = f"{BASE}/results/reinforce"
+PROJECT_ROOT = Path(os.environ.get("BRCA_DRUG_PRED_ROOT", Path(__file__).resolve().parents[2])).resolve()
+FINAL_ROOT = PROJECT_ROOT / "FINAL"
+DATA_ROOT = Path(os.environ.get("BRCA_DRUG_PRED_DATA_ROOT", PROJECT_ROOT / "data")).resolve()
+
+INT = DATA_ROOT / "07_integrated"
+MB = DATA_ROOT / "08_metabric"
+OUT_DIR = FINAL_ROOT / "results" / "reinforce"
 os.makedirs(OUT_DIR, exist_ok=True)
 
 DRUGS = [

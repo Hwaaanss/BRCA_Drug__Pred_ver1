@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """PathOmicDRP High-Impact Analyses (1-6)"""
 import os, sys, json, time, warnings, traceback
+from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
@@ -15,28 +16,38 @@ from sklearn.decomposition import PCA
 from scipy.stats import pearsonr, spearmanr, mannwhitneyu
 from collections import defaultdict
 warnings.filterwarnings('ignore')
-sys.path.insert(0, '/data/data/Drug_Pred/src')
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+BASE = Path(os.environ.get("BRCA_DRUG_PRED_ROOT", PROJECT_ROOT)).resolve()
+DATA_ROOT = Path(os.environ.get("BRCA_DRUG_PRED_DATA_ROOT", BASE / "data")).resolve()
+if not (DATA_ROOT / "07_integrated").exists() and (BASE / "07_integrated").exists():
+    DATA_ROOT = BASE
+
+RESULTS_DIR = BASE / "results"
+INTEGRATED_DIR = DATA_ROOT / "07_integrated"
+CLINICAL_DIR = DATA_ROOT / "01_clinical"
+HISTO_DIR = DATA_ROOT / "05_morphology" / "features"
+
+sys.path.insert(0, str(BASE / "src"))
 from model import PathOmicDRP, get_default_config
 from train_phase3_4modal import MultiDrugDataset4Modal, collate_4modal
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-BASE = "/data/data/Drug_Pred"
-HISTO_DIR = f"{BASE}/05_morphology/features"
 
 def log(msg):
     print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
 
 def load_all():
-    with open(f"{BASE}/results/phase3_4modal_full/cv_results.json") as f:
+    with open(RESULTS_DIR / "phase3_4modal_full" / "cv_results.json") as f:
         cv = json.load(f)
     config = cv['config']; drug_cols = cv['drugs']
     model = PathOmicDRP(config).to(DEVICE)
-    state = torch.load(f"{BASE}/results/phase3_4modal_full/best_model.pt", map_location=DEVICE, weights_only=True)
+    state = torch.load(RESULTS_DIR / "phase3_4modal_full" / "best_model.pt", map_location=DEVICE, weights_only=True)
     model.load_state_dict(state); model.eval()
-    gen_df = pd.read_csv(f"{BASE}/07_integrated/X_genomic.csv")
-    tra_df = pd.read_csv(f"{BASE}/07_integrated/X_transcriptomic.csv")
-    pro_df = pd.read_csv(f"{BASE}/07_integrated/X_proteomic.csv")
-    ic50_df = pd.read_csv(f"{BASE}/07_integrated/predicted_IC50_all_drugs.csv", index_col=0)
+    gen_df = pd.read_csv(INTEGRATED_DIR / "X_genomic.csv")
+    tra_df = pd.read_csv(INTEGRATED_DIR / "X_transcriptomic.csv")
+    pro_df = pd.read_csv(INTEGRATED_DIR / "X_proteomic.csv")
+    ic50_df = pd.read_csv(INTEGRATED_DIR / "predicted_IC50_all_drugs.csv", index_col=0)
     histo_ids = {f.replace('.pt','') for f in os.listdir(HISTO_DIR) if f.endswith('.pt')}
     common = sorted(set(gen_df['patient_id']) & set(tra_df['patient_id']) & set(pro_df['patient_id']) & set(ic50_df.index) & histo_ids)
     dataset = MultiDrugDataset4Modal(common, gen_df, tra_df, pro_df, ic50_df, drug_cols, histo_dir=HISTO_DIR, fit=True)
@@ -61,8 +72,8 @@ def get_embeddings(model, dataset, use_histo=True):
 # ═══ ANALYSIS 1: Clinical Outcome ═══
 def analysis1(model, dataset, pids, emb4, emb3):
     log("═══ ANALYSIS 1: Direct Clinical Outcome ═══")
-    out_dir = f"{BASE}/results/analysis1_clinical_outcome"; os.makedirs(out_dir, exist_ok=True)
-    drug_df = pd.read_csv(f"{BASE}/01_clinical/TCGA_BRCA_drug_treatments.csv")
+    out_dir = RESULTS_DIR / "analysis1_clinical_outcome"; os.makedirs(out_dir, exist_ok=True)
+    drug_df = pd.read_csv(CLINICAL_DIR / "TCGA_BRCA_drug_treatments.csv")
     pid_set = set(pids); pid_to_idx = {p:i for i,p in enumerate(pids)}
     results = {}
     for drug_name in ['Docetaxel','Paclitaxel','Tamoxifen','Cyclophosphamide']:
@@ -98,7 +109,7 @@ def analysis1(model, dataset, pids, emb4, emb3):
 # ═══ ANALYSIS 2: Drug-specific Attention ═══
 def analysis2(model, dataset, pids, drug_cols, drug_names):
     log("═══ ANALYSIS 2: Drug-specific Attention ═══")
-    out_dir = f"{BASE}/results/analysis2_drug_attention"; os.makedirs(out_dir, exist_ok=True)
+    out_dir = RESULTS_DIR / "analysis2_drug_attention"; os.makedirs(out_dir, exist_ok=True)
     n_pat = min(20, len(dataset)); n_drugs = len(drug_cols)
     corrs = np.zeros((n_drugs, n_drugs)); n_ok = 0
     for i in range(n_pat):
@@ -132,7 +143,7 @@ def analysis2(model, dataset, pids, drug_cols, drug_names):
 # ═══ ANALYSIS 3: Leave-One-Drug-Out ═══
 def analysis3(dataset, drug_cols, drug_names, pids):
     log("═══ ANALYSIS 3: Leave-One-Drug-Out ═══")
-    out_dir = f"{BASE}/results/analysis3_lodo"; os.makedirs(out_dir, exist_ok=True)
+    out_dir = RESULTS_DIR / "analysis3_lodo"; os.makedirs(out_dir, exist_ok=True)
     y_all, X_all = [], []
     for i in range(len(dataset)):
         s = dataset[i]; y_all.append(s['target'].numpy())
@@ -159,8 +170,8 @@ def analysis3(dataset, drug_cols, drug_names, pids):
 # ═══ ANALYSIS 4: Multi-task Survival ═══
 def analysis4(config, drug_cols, drug_names, pids):
     log("═══ ANALYSIS 4: Multi-task Survival ═══")
-    out_dir = f"{BASE}/results/analysis4_multitask"; os.makedirs(out_dir, exist_ok=True)
-    clin = pd.read_csv(f"{BASE}/01_clinical/TCGA_BRCA_clinical.csv").set_index('submitter_id')
+    out_dir = RESULTS_DIR / "analysis4_multitask"; os.makedirs(out_dir, exist_ok=True)
+    clin = pd.read_csv(CLINICAL_DIR / "TCGA_BRCA_clinical.csv").set_index('submitter_id')
     surv = {}
     for pid in pids:
         if pid not in clin.index: continue
@@ -172,10 +183,10 @@ def analysis4(config, drug_cols, drug_names, pids):
         surv[pid] = {'time': float(t), 'event': ev}
     log(f"  Survival: {len(surv)} patients, {sum(v['event'] for v in surv.values())} events")
 
-    gen_df = pd.read_csv(f"{BASE}/07_integrated/X_genomic.csv")
-    tra_df = pd.read_csv(f"{BASE}/07_integrated/X_transcriptomic.csv")
-    pro_df = pd.read_csv(f"{BASE}/07_integrated/X_proteomic.csv")
-    ic50_df = pd.read_csv(f"{BASE}/07_integrated/predicted_IC50_all_drugs.csv", index_col=0)
+    gen_df = pd.read_csv(INTEGRATED_DIR / "X_genomic.csv")
+    tra_df = pd.read_csv(INTEGRATED_DIR / "X_transcriptomic.csv")
+    pro_df = pd.read_csv(INTEGRATED_DIR / "X_proteomic.csv")
+    ic50_df = pd.read_csv(INTEGRATED_DIR / "predicted_IC50_all_drugs.csv", index_col=0)
 
     def cox_loss(risk, times, events):
         si = torch.argsort(times, descending=True)
@@ -268,7 +279,7 @@ def analysis4(config, drug_cols, drug_names, pids):
 # ═══ ANALYSIS 5: Biomarker Concordance ═══
 def analysis5(model, dataset, pids, drug_cols, drug_names, pro_df):
     log("═══ ANALYSIS 5: Biomarker Concordance ═══")
-    out_dir = f"{BASE}/results/analysis5_external_validation"; os.makedirs(out_dir, exist_ok=True)
+    out_dir = RESULTS_DIR / "analysis5_external_validation"; os.makedirs(out_dir, exist_ok=True)
     loader = DataLoader(dataset, batch_size=32, shuffle=False, num_workers=0, collate_fn=collate_4modal)
     ap = []
     with torch.no_grad():
@@ -280,7 +291,7 @@ def analysis5(model, dataset, pids, drug_cols, drug_names, pro_df):
     ap = dataset.scalers['ic50'].inverse_transform(np.concatenate(ap))
     pred_df = pd.DataFrame(ap, columns=drug_names, index=pids)
     pro = pro_df.set_index('patient_id'); cp = [p for p in pids if p in pro.index]
-    gen_df = pd.read_csv(f"{BASE}/07_integrated/X_genomic.csv").set_index('patient_id')
+    gen_df = pd.read_csv(INTEGRATED_DIR / "X_genomic.csv").set_index('patient_id')
     cg = [p for p in pids if p in gen_df.index]
     results = {}
 
@@ -323,7 +334,7 @@ def analysis5(model, dataset, pids, drug_cols, drug_names, pro_df):
 # ═══ ANALYSIS 6: Phenotype Discovery ═══
 def analysis6(model, dataset, pids, drug_cols, drug_names):
     log("═══ ANALYSIS 6: Pathology Phenotype Discovery ═══")
-    out_dir = f"{BASE}/results/analysis6_phenotype"; os.makedirs(out_dir, exist_ok=True)
+    out_dir = RESULTS_DIR / "analysis6_phenotype"; os.makedirs(out_dir, exist_ok=True)
     n_pat = min(50, len(dataset)); top_k = 50
     # Get predictions
     loader = DataLoader(dataset, batch_size=32, shuffle=False, num_workers=0, collate_fn=collate_4modal)
@@ -402,6 +413,6 @@ if __name__ == '__main__':
             ALL[name] = fn()
         except Exception as e:
             log(f"  {name} FAILED: {e}"); traceback.print_exc()
-    with open(f"{BASE}/results/high_impact_results.json",'w') as f:
+    with open(RESULTS_DIR / "high_impact_results.json",'w') as f:
         json.dump(ALL, f, indent=2, default=str)
     log("\n═══ ALL 6 ANALYSES COMPLETE ═══")

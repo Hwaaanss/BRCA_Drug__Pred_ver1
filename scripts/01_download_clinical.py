@@ -3,7 +3,8 @@
 import requests, json, os, csv
 
 BASE = "https://api.gdc.cancer.gov"
-OUT_DIR = "/data/data/Drug_Pred/01_clinical"
+OUT_DIR = "./data/01_clinical"
+os.makedirs(OUT_DIR, exist_ok=True)
 
 # 1. Clinical data (demographics, diagnoses, treatments, exposures)
 def download_clinical():

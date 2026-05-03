@@ -13,16 +13,18 @@ Classifies drugs by Mechanism of Action (MOA) and identifies patterns:
 Output: results/reinforce/drug_heterogeneity.json + figure + per-drug table.
 """
 import os, json
+from pathlib import Path
 import numpy as np
 import pandas as pd
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-BASE = "/data/data/Drug_Pred"
-RES  = f"{BASE}/results"
-OUT  = f"{RES}/reinforce"
-FIG  = f"{BASE}/research/figures/figures_v6"
+PROJECT_ROOT = Path(os.environ.get("BRCA_DRUG_PRED_ROOT", Path(__file__).resolve().parents[2])).resolve()
+FINAL_ROOT = PROJECT_ROOT / "FINAL"
+RES = FINAL_ROOT / "results"
+OUT = RES / "reinforce"
+FIG = FINAL_ROOT / "figures" / "reinforce_v6_v7"
 os.makedirs(OUT, exist_ok=True); os.makedirs(FIG, exist_ok=True)
 
 # Mechanism of action classification (BRCA-relevant 13 drugs)

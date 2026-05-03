@@ -2,10 +2,15 @@
 PathOmicDRP: Pathology-Omics Drug Response Predictor
 
 Multi-modal deep learning framework integrating:
-  - Genomic features (mutation binary + TMB)
+  - Genomic features (mutation binary + TMB)  [+ KD_GNN preprocessor]
   - Transcriptomic features (pathway-level scores)
-  - Proteomic features (RPPA protein expression)
+  - Proteomic features (RPPA protein expression)  [+ KD_GNN preprocessor]
   - Histopathology features (UNI foundation model + ABMIL)
+
+KD_GNN: per-modality GCN over genes/proteins as nodes, with an EMA
+self-distillation teacher (despite the historical "KD" naming, the teacher
+is an exponential-moving-average copy of the student rather than an
+externally pretrained model — closer in spirit to BYOL-style self-distillation).
 
 Fusion: Cross-attention between omics tokens and histology tokens
 Output: Drug response prediction (IC50 regression / binary classification)
@@ -15,6 +20,180 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math
+
+
+# ---------------------------------------------------------------------------
+# 0. Knowledge-Distilled GNN (EMA self-distillation) for genomic / proteomic
+# ---------------------------------------------------------------------------
+
+class OmicsGNN(nn.Module):
+    """GCN-style encoder over omic features (each gene/protein is a node).
+
+    Message passing uses a (provided) symmetrically-normalized adjacency.
+    Default adjacency is fully connected with self-loops; callers can swap
+    in a biologically-grounded graph (pathway/PPI/phosphorylation) via
+    ``OmicsKDGNN.set_adjacency``.
+    """
+
+    def __init__(
+        self,
+        n_nodes: int,
+        in_dim: int = 1,
+        hidden_dim: int = 32,
+        n_layers: int = 2,
+        dropout: float = 0.1,
+    ):
+        super().__init__()
+        self.n_nodes = n_nodes
+        self.in_dim = in_dim
+        self.hidden_dim = hidden_dim
+        self.n_layers = n_layers
+
+        self.input_proj = nn.Linear(in_dim, hidden_dim)
+        self.node_embed = nn.Embedding(n_nodes, hidden_dim)
+
+        self.gcn_layers = nn.ModuleList(
+            [nn.Linear(hidden_dim, hidden_dim) for _ in range(n_layers)]
+        )
+        self.layer_norms = nn.ModuleList(
+            [nn.LayerNorm(hidden_dim) for _ in range(n_layers)]
+        )
+        self.activation = nn.GELU()
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, node_features: torch.Tensor, adj_norm: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            node_features: (B, n_nodes, in_dim)
+            adj_norm:      (n_nodes, n_nodes) symmetrically normalized adjacency
+        Returns:
+            embeddings:    (B, n_nodes, hidden_dim)
+        """
+        h = self.input_proj(node_features)  # (B, n_nodes, hidden_dim)
+        ids = torch.arange(self.n_nodes, device=node_features.device)
+        h = h + self.node_embed(ids).unsqueeze(0)  # broadcast over batch
+
+        for i in range(self.n_layers):
+            # Message passing: agg[b,i,d] = sum_j adj_norm[i,j] * h[b,j,d]
+            agg = torch.einsum('ij,bjd->bid', adj_norm, h)
+            h_new = self.gcn_layers[i](agg)
+            h_new = self.layer_norms[i](h_new)
+            h_new = self.activation(h_new)
+            h_new = self.dropout(h_new)
+            h = h + h_new  # residual
+
+        return h
+
+
+class OmicsKDGNN(nn.Module):
+    """Student + EMA teacher GNN pair with self-distillation.
+
+    The student is updated by gradient descent (regression loss + KD loss).
+    The teacher is an exponential moving average of the student's weights
+    and receives no gradient. KD loss is a 1 - cosine similarity between
+    student and (detached) teacher per-node embeddings.
+    """
+
+    def __init__(
+        self,
+        n_nodes: int,
+        in_dim: int = 1,
+        hidden_dim: int = 32,
+        n_layers: int = 2,
+        dropout: float = 0.1,
+        ema_decay: float = 0.99,
+        adjacency: torch.Tensor = None,
+    ):
+        super().__init__()
+        self.n_nodes = n_nodes
+        self.in_dim = in_dim
+        self.hidden_dim = hidden_dim
+        self.ema_decay = ema_decay
+
+        self.student = OmicsGNN(n_nodes, in_dim, hidden_dim, n_layers, dropout)
+        self.teacher = OmicsGNN(n_nodes, in_dim, hidden_dim, n_layers, dropout)
+        for p in self.teacher.parameters():
+            p.requires_grad = False
+
+        # Initialize teacher == student
+        with torch.no_grad():
+            for ps, pt in zip(self.student.parameters(), self.teacher.parameters()):
+                pt.data.copy_(ps.data)
+
+        if adjacency is None:
+            adjacency = torch.ones(n_nodes, n_nodes)
+        self.register_buffer('adj_norm', self._normalize_adj(adjacency))
+
+    @staticmethod
+    def _normalize_adj(adj: torch.Tensor) -> torch.Tensor:
+        """Symmetric normalization with self-loops: D^-1/2 (A + I) D^-1/2."""
+        adj = adj.float()
+        eye = torch.eye(adj.size(0), dtype=adj.dtype, device=adj.device)
+        adj_self = ((adj + eye) > 0).float()
+        deg = adj_self.sum(dim=1)
+        deg_inv_sqrt = deg.clamp(min=1.0).pow(-0.5)
+        return adj_self * deg_inv_sqrt.unsqueeze(0) * deg_inv_sqrt.unsqueeze(1)
+
+    def set_adjacency(self, adj: torch.Tensor) -> None:
+        """Replace the adjacency buffer with a (binary) biological graph."""
+        if tuple(adj.shape) != (self.n_nodes, self.n_nodes):
+            raise ValueError(
+                f"Expected adjacency shape ({self.n_nodes}, {self.n_nodes}), "
+                f"got {tuple(adj.shape)}"
+            )
+        norm = self._normalize_adj(adj.to(self.adj_norm.device))
+        self.adj_norm = norm.to(self.adj_norm.dtype)
+
+    def train(self, mode: bool = True):
+        """Override so the teacher is always in eval (no dropout, frozen BN)."""
+        super().train(mode)
+        self.teacher.eval()
+        return self
+
+    @torch.no_grad()
+    def update_teacher(self, decay: float = None) -> None:
+        """EMA update: theta_teacher <- d * theta_teacher + (1 - d) * theta_student."""
+        d = self.ema_decay if decay is None else decay
+        for ps, pt in zip(self.student.parameters(), self.teacher.parameters()):
+            pt.data.mul_(d).add_(ps.data, alpha=1.0 - d)
+
+    def forward(self, x: torch.Tensor) -> dict:
+        """
+        Args:
+            x: (B, n_nodes) or (B, n_nodes, in_dim) raw per-node feature(s)
+        Returns:
+            dict with
+              - 'pooled':      (B, hidden_dim) mean-pooled student embedding
+              - 'student_emb': (B, n_nodes, hidden_dim)
+              - 'teacher_emb': (B, n_nodes, hidden_dim)  [only when training]
+        """
+        if x.dim() == 2:
+            x = x.unsqueeze(-1)  # (B, n_nodes, 1)
+        if x.size(-1) != self.in_dim:
+            raise ValueError(
+                f"OmicsKDGNN: expected feature dim {self.in_dim}, got {x.size(-1)}"
+            )
+        if x.size(1) != self.n_nodes:
+            raise ValueError(
+                f"OmicsKDGNN: expected n_nodes={self.n_nodes}, got {x.size(1)}"
+            )
+
+        student_emb = self.student(x, self.adj_norm)  # (B, n_nodes, hidden_dim)
+        pooled = student_emb.mean(dim=1)              # (B, hidden_dim)
+
+        out = {'pooled': pooled, 'student_emb': student_emb}
+        if self.training:
+            with torch.no_grad():
+                teacher_emb = self.teacher(x, self.adj_norm)
+            out['teacher_emb'] = teacher_emb
+        return out
+
+    @staticmethod
+    def kd_loss(student_emb: torch.Tensor, teacher_emb: torch.Tensor) -> torch.Tensor:
+        """1 - cosine similarity between per-node embeddings (teacher detached)."""
+        s = F.normalize(student_emb, dim=-1)
+        t = F.normalize(teacher_emb.detach(), dim=-1)
+        return (1.0 - (s * t).sum(dim=-1)).mean()
 
 
 # ---------------------------------------------------------------------------
@@ -323,9 +502,57 @@ class PathOmicDRP(nn.Module):
         hidden_dim = config.get('hidden_dim', 256)
         dropout = config.get('dropout', 0.1)
 
+        # --- KD_GNN preprocessor (genomic + proteomic) ---
+        self.use_kd_gnn = config.get('use_kd_gnn', True)
+        kd_hidden = config.get('kd_gnn_hidden', 32)
+        kd_layers = config.get('kd_gnn_layers', 2)
+        kd_dropout = config.get('kd_gnn_dropout', dropout)
+        kd_in_dim_g = config.get('kd_gnn_in_dim_genomic', 1)
+        kd_in_dim_p = config.get('kd_gnn_in_dim_proteomic', 1)
+        kd_ema = config.get('kd_ema_decay', 0.99)
+        self.lambda_kd = config.get('lambda_kd', 0.05)
+
+        if self.use_kd_gnn:
+            if config['genomic_dim'] % kd_in_dim_g != 0:
+                raise ValueError(
+                    "genomic_dim must be divisible by kd_gnn_in_dim_genomic "
+                    f"(got {config['genomic_dim']} % {kd_in_dim_g})"
+                )
+            if config['proteomic_dim'] % kd_in_dim_p != 0:
+                raise ValueError(
+                    "proteomic_dim must be divisible by kd_gnn_in_dim_proteomic "
+                    f"(got {config['proteomic_dim']} % {kd_in_dim_p})"
+                )
+            n_genomic_nodes = config['genomic_dim'] // kd_in_dim_g
+            n_proteomic_nodes = config['proteomic_dim'] // kd_in_dim_p
+
+            self.genomic_kd_gnn = OmicsKDGNN(
+                n_nodes=n_genomic_nodes,
+                in_dim=kd_in_dim_g,
+                hidden_dim=kd_hidden,
+                n_layers=kd_layers,
+                dropout=kd_dropout,
+                ema_decay=kd_ema,
+            )
+            self.proteomic_kd_gnn = OmicsKDGNN(
+                n_nodes=n_proteomic_nodes,
+                in_dim=kd_in_dim_p,
+                hidden_dim=kd_hidden,
+                n_layers=kd_layers,
+                dropout=kd_dropout,
+                ema_decay=kd_ema,
+            )
+            genomic_encoder_input_dim = kd_hidden
+            proteomic_encoder_input_dim = kd_hidden
+        else:
+            self.genomic_kd_gnn = None
+            self.proteomic_kd_gnn = None
+            genomic_encoder_input_dim = config['genomic_dim']
+            proteomic_encoder_input_dim = config['proteomic_dim']
+
         # --- Modality Encoders ---
         self.genomic_encoder = GenomicEncoder(
-            input_dim=config['genomic_dim'],
+            input_dim=genomic_encoder_input_dim,
             hidden_dim=hidden_dim,
             n_tokens=config.get('genomic_tokens', 8),
             dropout=dropout,
@@ -337,7 +564,7 @@ class PathOmicDRP(nn.Module):
             dropout=dropout,
         )
         self.proteomic_encoder = ProteomicEncoder(
-            input_dim=config['proteomic_dim'],
+            input_dim=proteomic_encoder_input_dim,
             hidden_dim=hidden_dim,
             n_tokens=config.get('proteomic_tokens', 16),
             dropout=dropout,
@@ -389,23 +616,40 @@ class PathOmicDRP(nn.Module):
     ) -> dict:
         """
         Args:
-            genomic: (B, genomic_dim) mutation features
+            genomic: (B, genomic_dim) mutation features (or (B, n_nodes, in_dim))
             transcriptomic: (B, n_pathways) pathway scores
-            proteomic: (B, proteomic_dim) RPPA features
+            proteomic: (B, proteomic_dim) RPPA features (or (B, n_nodes, in_dim))
             histology: (B, N_patches, histo_feature_dim) UNI patch features (optional)
             histo_mask: (B, N_patches) valid patch mask (optional)
         Returns:
-            dict with 'prediction', and optionally 'attention_weights'
+            dict with 'prediction', plus optionally 'kd_loss' (training only)
+            and 'histo_attention'.
         """
+        # --- KD_GNN preprocessing for genomic + proteomic ---
+        kd_loss_total = None
+        if self.use_kd_gnn:
+            gen_kd = self.genomic_kd_gnn(genomic)
+            prot_kd = self.proteomic_kd_gnn(proteomic)
+            gen_input = gen_kd['pooled']    # (B, kd_hidden)
+            prot_input = prot_kd['pooled']  # (B, kd_hidden)
+
+            if 'teacher_emb' in gen_kd and 'teacher_emb' in prot_kd:
+                kd_g = OmicsKDGNN.kd_loss(gen_kd['student_emb'], gen_kd['teacher_emb'])
+                kd_p = OmicsKDGNN.kd_loss(prot_kd['student_emb'], prot_kd['teacher_emb'])
+                kd_loss_total = kd_g + kd_p
+        else:
+            gen_input = genomic
+            prot_input = proteomic
+
         # Encode each modality into tokens
         gen_tokens = self._modality_dropout(
-            self.genomic_encoder(genomic), 'genomic'
+            self.genomic_encoder(gen_input), 'genomic'
         )
         path_tokens = self._modality_dropout(
             self.pathway_tokenizer(transcriptomic), 'transcriptomic'
         )
         prot_tokens = self._modality_dropout(
-            self.proteomic_encoder(proteomic), 'proteomic'
+            self.proteomic_encoder(prot_input), 'proteomic'
         )
 
         # Concatenate omics tokens
@@ -427,8 +671,30 @@ class PathOmicDRP(nn.Module):
         output = {'prediction': prediction}
         if histo_attn is not None:
             output['histo_attention'] = histo_attn
+        if kd_loss_total is not None:
+            output['kd_loss'] = kd_loss_total
 
         return output
+
+    @torch.no_grad()
+    def update_teacher(self, decay: float = None) -> None:
+        """EMA update of KD_GNN teachers from the current student weights.
+
+        Call this once per optimizer step (after backward + step).
+        """
+        if self.use_kd_gnn:
+            self.genomic_kd_gnn.update_teacher(decay)
+            self.proteomic_kd_gnn.update_teacher(decay)
+
+    def set_genomic_adjacency(self, adj: torch.Tensor) -> None:
+        """Inject a biological adjacency (pathway / signaling) for genomic GNN."""
+        if self.use_kd_gnn:
+            self.genomic_kd_gnn.set_adjacency(adj)
+
+    def set_proteomic_adjacency(self, adj: torch.Tensor) -> None:
+        """Inject a biological adjacency (PPI / phosphorylation) for proteomic GNN."""
+        if self.use_kd_gnn:
+            self.proteomic_kd_gnn.set_adjacency(adj)
 
 
 # ---------------------------------------------------------------------------
@@ -460,6 +726,15 @@ def get_default_config(
         'task': 'regression',
         'use_histology': use_histology,
         'modality_dropout': 0.15,
+        # --- KD_GNN settings (EMA self-distillation over gene/protein graphs) ---
+        'use_kd_gnn': True,
+        'kd_gnn_hidden': 32,
+        'kd_gnn_layers': 2,
+        'kd_gnn_dropout': 0.1,
+        'kd_gnn_in_dim_genomic': 1,    # 1 if mutation-only; 2 for mutation + CNV
+        'kd_gnn_in_dim_proteomic': 1,  # RPPA expression scalar per protein
+        'kd_ema_decay': 0.99,
+        'lambda_kd': 0.05,
     }
 
 
@@ -474,14 +749,23 @@ if __name__ == '__main__':
     proteomic = torch.randn(B, 464)
     histology = torch.randn(B, 100, 1024)  # 100 patches, UNI features
 
+    model.train()
     output = model(genomic, transcriptomic, proteomic, histology)
     print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
+    print(f"  trainable: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
     print(f"Prediction shape: {output['prediction'].shape}")
     print(f"Histo attention shape: {output['histo_attention'].shape}")
+    print(f"KD loss (train mode): {output.get('kd_loss')}")
 
-    # Without histology
+    # Eval mode — KD loss should NOT be present
+    model.eval()
+    out_eval = model(genomic, transcriptomic, proteomic, histology)
+    print(f"KD loss in eval mode: {out_eval.get('kd_loss')}  (should be None)")
+
+    # Without histology, no KD_GNN
     config_no_histo = get_default_config(use_histology=False)
+    config_no_histo['use_kd_gnn'] = False
     model2 = PathOmicDRP(config_no_histo)
     output2 = model2(genomic, transcriptomic, proteomic)
-    print(f"\nOmics-only parameters: {sum(p.numel() for p in model2.parameters()):,}")
+    print(f"\nOmics-only (no KD_GNN) parameters: {sum(p.numel() for p in model2.parameters()):,}")
     print(f"Omics-only prediction: {output2['prediction'].shape}")

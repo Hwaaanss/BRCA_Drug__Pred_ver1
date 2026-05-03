@@ -11,6 +11,7 @@ Outputs
   results/clinical_utility/clinical_utility_summary_v2.json
 """
 import os, json, time
+from pathlib import Path
 import numpy as np, pandas as pd
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import StratifiedKFold
@@ -18,10 +19,13 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import roc_auc_score
 from sklearn.utils import resample
 
-OOF_DIR   = "/data/data/Drug_Pred/results/oof"
-BASE      = "/data/data/Drug_Pred/07_integrated"
-CLIN_DIR  = "/data/data/Drug_Pred/01_clinical"
-OUT       = "/data/data/Drug_Pred/results/clinical_utility"
+PROJECT_ROOT = Path(os.environ.get("BRCA_DRUG_PRED_ROOT", Path(__file__).resolve().parents[1])).resolve()
+DATA_ROOT = Path(os.environ.get("BRCA_DRUG_PRED_DATA_ROOT", PROJECT_ROOT / "data")).resolve()
+
+OOF_DIR = PROJECT_ROOT / "results" / "oof"
+BASE = DATA_ROOT / "07_integrated"
+CLIN_DIR = DATA_ROOT / "01_clinical"
+OUT = PROJECT_ROOT / "results" / "clinical_utility"
 os.makedirs(OUT, exist_ok=True)
 
 PANEL_DRUGS = [

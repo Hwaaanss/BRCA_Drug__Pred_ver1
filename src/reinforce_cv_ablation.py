@@ -7,6 +7,7 @@ enabling proper uncertainty quantification on modality importance.
 Output: results/reinforce/cv_ablation.json
 """
 import os, sys, json, time, copy
+from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
@@ -15,14 +16,17 @@ from torch.utils.data import DataLoader
 from sklearn.model_selection import KFold
 from scipy.stats import pearsonr
 
-sys.path.insert(0, '/data/data/Drug_Pred/src')
+PROJECT_ROOT = Path(os.environ.get("BRCA_DRUG_PRED_ROOT", Path(__file__).resolve().parents[1])).resolve()
+DATA_ROOT = Path(os.environ.get("BRCA_DRUG_PRED_DATA_ROOT", PROJECT_ROOT / "data")).resolve()
+
+sys.path.insert(0, str(PROJECT_ROOT / "src"))
 from model import PathOmicDRP, get_default_config
 from train_phase3_4modal import MultiDrugDataset4Modal, collate_4modal, train_epoch
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-BASE = "/data/data/Drug_Pred/07_integrated"
-HISTO_DIR = "/data/data/Drug_Pred/05_morphology/features"
-OUT_DIR = "/data/data/Drug_Pred/results/reinforce"
+BASE = DATA_ROOT / "07_integrated"
+HISTO_DIR = DATA_ROOT / "05_morphology" / "features"
+OUT_DIR = PROJECT_ROOT / "results" / "reinforce"
 os.makedirs(OUT_DIR, exist_ok=True)
 
 DRUGS = [

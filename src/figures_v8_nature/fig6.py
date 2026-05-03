@@ -9,7 +9,7 @@
 import os, numpy as np, pandas as pd, matplotlib.pyplot as plt, matplotlib.gridspec as gs
 from matplotlib.patches import Rectangle
 from . import style as S
-from .loaders import J, BASE, load_lodo, load_multitask, load_phenotype, DRUG_ORDER_13, DRUG_MOA
+from .loaders import J, DATA_ROOT, load_lodo, load_multitask, load_phenotype, DRUG_ORDER_13, DRUG_MOA
 
 
 def panel_a_lodo(ax):
@@ -38,7 +38,7 @@ def panel_a_lodo(ax):
 
 def panel_b_attn_corr(ax):
     """Drug-drug predicted-IC50 correlation as proxy for attention similarity."""
-    ic = pd.read_csv(f"{BASE}/07_integrated/predicted_IC50_all_drugs.csv", index_col=0)
+    ic = pd.read_csv(DATA_ROOT / "07_integrated" / "predicted_IC50_all_drugs.csv", index_col=0)
     ren = {c: c.split('_')[0] for c in ic.columns}
     ic = ic.rename(columns=ren)
     ic = ic.loc[:, ~ic.columns.duplicated()]
@@ -157,4 +157,4 @@ def make(out_dir):
 
 
 if __name__ == '__main__':
-    make('/data/data/Drug_Pred/research/figures/figures_v8')
+    make(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'research', 'figures', 'figures_v8'))

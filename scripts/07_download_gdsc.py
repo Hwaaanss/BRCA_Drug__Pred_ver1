@@ -2,7 +2,8 @@
 """Download GDSC drug sensitivity data for breast cancer cell lines."""
 import requests, os
 
-OUT_DIR = "/data/data/Drug_Pred/06_drug_response/gdsc"
+OUT_DIR = "./data/06_drug_response/gdsc"
+os.makedirs(OUT_DIR, exist_ok=True)
 
 # GDSC2 fitted dose-response data (IC50, AUC)
 urls = {

@@ -9,6 +9,7 @@ import os
 import sys
 import json
 import time
+from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
@@ -22,6 +23,8 @@ from model import PathOmicDRP, get_default_config
 from dataset import PathOmicDataset, collate_fn, load_data
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+PROJECT_ROOT = Path(os.environ.get("BRCA_DRUG_PRED_ROOT", Path(__file__).resolve().parents[1])).resolve()
+DATA_ROOT = Path(os.environ.get("BRCA_DRUG_PRED_DATA_ROOT", PROJECT_ROOT / "data")).resolve()
 
 
 # ---------------------------------------------------------------------------
@@ -46,9 +49,10 @@ class EarlyStopping:
                 self.early_stop = True
 
 
-def train_one_epoch(model, dataloader, optimizer, criterion, device):
+def train_one_epoch(model, dataloader, optimizer, criterion, device, lambda_kd: float = 0.0):
     model.train()
-    total_loss = 0
+    total_loss = 0.0      # tracks regression loss only (comparable across configs)
+    total_kd = 0.0
     n_samples = 0
 
     for batch in dataloader:
@@ -66,16 +70,36 @@ def train_one_epoch(model, dataloader, optimizer, criterion, device):
         optimizer.zero_grad()
         output = model(genomic, transcriptomic, proteomic, histology, histo_mask)
         pred = output['prediction'].squeeze(-1)
-        loss = criterion(pred, target)
+        reg_loss = criterion(pred, target)
+
+        loss = reg_loss
+        kd_value = 0.0
+        if lambda_kd > 0 and 'kd_loss' in output:
+            kd_term = output['kd_loss']
+            loss = loss + lambda_kd * kd_term
+            kd_value = kd_term.item()
+
         loss.backward()
 
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        torch.nn.utils.clip_grad_norm_(
+            [p for p in model.parameters() if p.requires_grad], max_norm=1.0
+        )
         optimizer.step()
 
-        total_loss += loss.item() * len(target)
-        n_samples += len(target)
+        # EMA self-distillation: update teacher from updated student
+        if hasattr(model, 'update_teacher'):
+            model.update_teacher()
 
-    return total_loss / n_samples
+        bs = len(target)
+        total_loss += reg_loss.item() * bs
+        total_kd += kd_value * bs
+        n_samples += bs
+
+    avg_reg = total_loss / n_samples
+    avg_kd = total_kd / n_samples
+    if lambda_kd > 0:
+        return {'reg_loss': avg_reg, 'kd_loss': avg_kd}
+    return avg_reg
 
 
 @torch.no_grad()
@@ -134,12 +158,14 @@ def evaluate(model, dataloader, criterion, device):
 # Prepare clinical drug response as targets
 # ---------------------------------------------------------------------------
 
-def prepare_clinical_targets(base_dir="/data/data/Drug_Pred"):
+def prepare_clinical_targets(base_dir=None):
     """Prepare binary drug response targets from TCGA clinical data.
 
     Responder: Complete Response + Partial Response
     Non-responder: Progressive Disease + Stable Disease
     """
+    if base_dir is None:
+        base_dir = DATA_ROOT
     drug_df = pd.read_csv(os.path.join(base_dir, "01_clinical/TCGA_BRCA_drug_treatments.csv"))
 
     # Filter for clear outcomes only
@@ -175,7 +201,7 @@ def run_cross_validation(
     batch_size: int = 32,
     lr: float = 1e-3,
     weight_decay: float = 1e-4,
-    output_dir: str = "/data/data/Drug_Pred/results",
+    output_dir: str | os.PathLike = PROJECT_ROOT / "results",
     histology_dir: str = None,
 ):
     os.makedirs(output_dir, exist_ok=True)
@@ -225,14 +251,18 @@ def run_cross_validation(
         )
 
         train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True,
-                                   collate_fn=collate_fn, num_workers=0, drop_last=False)
+                                   collate_fn=collate_fn, num_workers=2, drop_last=False)
         val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False,
-                                 collate_fn=collate_fn, num_workers=0)
+                                 collate_fn=collate_fn, num_workers=2)
 
         # Model
         model = PathOmicDRP(config).to(DEVICE)
-        optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+        # KD_GNN teacher params have requires_grad=False — exclude them so AdamW
+        # doesn't allocate optimizer state for them.
+        trainable_params = [p for p in model.parameters() if p.requires_grad]
+        optimizer = torch.optim.AdamW(trainable_params, lr=lr, weight_decay=weight_decay)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=n_epochs, eta_min=lr * 0.01)
+        lambda_kd = float(config.get('lambda_kd', 0.0)) if config.get('use_kd_gnn', False) else 0.0
 
         if config.get('task') == 'classification':
             # Weighted BCE for class imbalance
@@ -246,7 +276,9 @@ def run_cross_validation(
         best_model_state = None
 
         for epoch in range(n_epochs):
-            train_loss = train_one_epoch(model, train_loader, optimizer, criterion, DEVICE)
+            train_out = train_one_epoch(
+                model, train_loader, optimizer, criterion, DEVICE, lambda_kd=lambda_kd
+            )
             val_metrics, _, _ = evaluate(model, val_loader, criterion, DEVICE)
             scheduler.step()
 
@@ -256,7 +288,14 @@ def run_cross_validation(
 
             if (epoch + 1) % 10 == 0:
                 metric_str = " | ".join(f"{k}: {v:.4f}" for k, v in val_metrics.items())
-                print(f"  Epoch {epoch+1:3d} | Train loss: {train_loss:.4f} | Val {metric_str}")
+                if isinstance(train_out, dict):
+                    train_str = (
+                        f"Train reg: {train_out['reg_loss']:.4f} | "
+                        f"KD: {train_out['kd_loss']:.4f}"
+                    )
+                else:
+                    train_str = f"Train loss: {train_out:.4f}"
+                print(f"  Epoch {epoch+1:3d} | {train_str} | Val {metric_str}")
 
             early_stopping(val_metrics['loss'])
             if early_stopping.early_stop:
@@ -308,11 +347,17 @@ if __name__ == '__main__':
     data = load_data()
     targets = prepare_clinical_targets()
 
+    # Derive feature dims from the loaded matrices (excludes 'patient_id' column).
+    genomic_dim = sum(1 for c in data['genomic'].columns if c != 'patient_id')
+    n_pathways = sum(1 for c in data['transcriptomic'].columns if c != 'patient_id')
+    proteomic_dim = sum(1 for c in data['proteomic'].columns if c != 'patient_id')
+    print(f"Feature dims  | genomic: {genomic_dim} | transcriptomic: {n_pathways} | proteomic: {proteomic_dim}")
+
     # Phase 1: Omics-only baseline (classification: responder vs non-responder)
     config = get_default_config(
-        genomic_dim=193,
-        n_pathways=2000,   # Using top 2000 variable genes as "pathways" for now
-        proteomic_dim=464,
+        genomic_dim=genomic_dim,
+        n_pathways=n_pathways,
+        proteomic_dim=proteomic_dim,
         n_drugs=1,
         use_histology=False,
     )
@@ -332,5 +377,5 @@ if __name__ == '__main__':
         batch_size=32,
         lr=5e-4,
         weight_decay=1e-4,
-        output_dir="/data/data/Drug_Pred/results/phase1_omics_baseline",
+        output_dir=PROJECT_ROOT / "results" / "phase1_omics_baseline",
     )

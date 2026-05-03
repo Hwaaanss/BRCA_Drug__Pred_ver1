@@ -3,8 +3,9 @@
 import os, tarfile, csv
 from collections import defaultdict
 
-RPPA_PATH = "/data/data/Drug_Pred/04_proteomic/rppa_batch.tar.gz"
-OUT_DIR = "/data/data/Drug_Pred/07_integrated"
+RPPA_PATH = "./data/04_proteomic/rppa_batch.tar.gz"
+OUT_DIR = "./data/07_integrated"
+os.makedirs(OUT_DIR, exist_ok=True)
 
 print("Extracting RPPA data...")
 

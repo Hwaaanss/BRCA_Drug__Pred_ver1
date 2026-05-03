@@ -10,6 +10,7 @@ Addresses two reviewer concerns:
 Output: results/reinforce/fair_embedding_and_bootstrap.json
 """
 import os, sys, json, time
+from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
@@ -20,15 +21,18 @@ from sklearn.model_selection import StratifiedKFold
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import roc_auc_score
 
-sys.path.insert(0, '/data/data/Drug_Pred/src')
+PROJECT_ROOT = Path(os.environ.get("BRCA_DRUG_PRED_ROOT", Path(__file__).resolve().parents[1])).resolve()
+DATA_ROOT = Path(os.environ.get("BRCA_DRUG_PRED_DATA_ROOT", PROJECT_ROOT / "data")).resolve()
+
+sys.path.insert(0, str(PROJECT_ROOT / "src"))
 from model import PathOmicDRP, get_default_config
 from train_phase3_4modal import MultiDrugDataset4Modal, collate_4modal
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-BASE = "/data/data/Drug_Pred"
-INT = f"{BASE}/07_integrated"
-HISTO_DIR = f"{BASE}/05_morphology/features"
-OUT_DIR = f"{BASE}/results/reinforce"
+DATA_DIR = DATA_ROOT
+INT = DATA_ROOT / "07_integrated"
+HISTO_DIR = DATA_ROOT / "05_morphology" / "features"
+OUT_DIR = PROJECT_ROOT / "results" / "reinforce"
 os.makedirs(OUT_DIR, exist_ok=True)
 
 DRUGS = [
@@ -101,7 +105,7 @@ def main():
     tra_df = pd.read_csv(f"{INT}/X_transcriptomic.csv")
     pro_df = pd.read_csv(f"{INT}/X_proteomic.csv")
     ic50_df = pd.read_csv(f"{INT}/predicted_IC50_all_drugs.csv", index_col=0)
-    drug_df = pd.read_csv(f"{BASE}/01_clinical/TCGA_BRCA_drug_treatments.csv")
+    drug_df = pd.read_csv(f"{DATA_DIR}/01_clinical/TCGA_BRCA_drug_treatments.csv")
 
     # 4-modal intersection
     common = sorted(set(gen_df['patient_id']) & set(tra_df['patient_id'])
@@ -149,8 +153,8 @@ def main():
 
     # Load PathOmicDRP 4-modal embeddings from fold models (use fold1 if cv_ablation done) else best
     emb_source = None
-    for path in [f"{OUT_DIR}/fold1_model.pt",
-                 f"{BASE}/results/phase3_4modal_full/best_model.pt"]:
+    for path in [OUT_DIR / "fold1_model.pt",
+                 PROJECT_ROOT / "results" / "phase3_4modal_full" / "best_model.pt"]:
         if os.path.exists(path):
             emb_source = path; break
     log(f"Using model weights: {emb_source}")
