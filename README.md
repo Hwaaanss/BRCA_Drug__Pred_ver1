@@ -181,6 +181,7 @@ python src/reinforce_fair_embedding.py
 python src/reinforce_metabric.py
 python src/reinforce_drug_heterogeneity.py
 python src/oof_predictions.py
+python src/extract_embeddings_attention.py
 python src/clinical_utility_v2.py
 python src/biological_validation.py
 python src/cptac_validation.py
