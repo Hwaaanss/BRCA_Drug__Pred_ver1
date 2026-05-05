@@ -131,7 +131,26 @@ def collate_4modal(batch):
     return result
 
 
-def train_epoch(model, loader, optimizer, criterion, use_histo=False):
+def per_drug_pearson_loss(pred, target, eps=1e-8):
+    """Differentiable mean per-drug Pearson loss: 1 - mean(corr)."""
+    if pred.size(0) < 2:
+        return pred.new_tensor(0.0)
+
+    pred_centered = pred - pred.mean(dim=0, keepdim=True)
+    target_centered = target - target.mean(dim=0, keepdim=True)
+    numerator = (pred_centered * target_centered).sum(dim=0)
+    denominator = torch.sqrt(
+        pred_centered.pow(2).sum(dim=0) * target_centered.pow(2).sum(dim=0) + eps
+    )
+    corr = numerator / denominator.clamp_min(eps)
+    corr = torch.nan_to_num(corr, nan=0.0, posinf=0.0, neginf=0.0)
+    return 1.0 - corr.mean()
+
+
+def train_epoch(
+    model, loader, optimizer, criterion, use_histo=False,
+    pearson_alpha=0.0, lambda_kd=0.0,
+):
     model.train()
     total_loss, n = 0, 0
     for batch in loader:
@@ -146,11 +165,20 @@ def train_epoch(model, loader, optimizer, criterion, use_histo=False):
             kwargs['histo_mask'] = batch['histo_mask'].to(DEVICE)
 
         optimizer.zero_grad()
-        out = model(g, t, p, **kwargs)['prediction']
-        loss = criterion(out, y)
+        output = model(g, t, p, **kwargs)
+        pred = output['prediction']
+
+        loss = criterion(pred, y)
+        if pearson_alpha > 0:
+            loss = loss + pearson_alpha * per_drug_pearson_loss(pred, y)
+        if lambda_kd > 0 and 'kd_loss' in output:
+            loss = loss + lambda_kd * output['kd_loss']
+
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         optimizer.step()
+        if hasattr(model, 'update_teacher'):
+            model.update_teacher()
 
         total_loss += loss.item() * len(y)
         n += len(y)
@@ -287,6 +315,8 @@ def run_experiment(
     config['task'] = 'regression'
     config['modality_dropout'] = 0.1
     config['hidden_dim'] = 256
+    pearson_alpha = 0.2
+    lambda_kd = float(config.get('lambda_kd', 0.0)) if config.get('use_kd_gnn', False) else 0.0
 
     kf = KFold(n_splits=n_folds, shuffle=True, random_state=42)
     all_fold_metrics = []
@@ -332,7 +362,11 @@ def run_experiment(
         patience_counter = 0
 
         for epoch in range(n_epochs):
-            train_loss = train_epoch(model, train_loader, optimizer, criterion, use_histo=use_histology)
+            train_loss = train_epoch(
+                model, train_loader, optimizer, criterion,
+                use_histo=use_histology,
+                pearson_alpha=pearson_alpha, lambda_kd=lambda_kd,
+            )
             val_metrics, _, _, _ = evaluate(model, val_loader, criterion, train_ds.scalers, drug_cols, use_histo=use_histology)
             scheduler.step()
 
@@ -389,6 +423,8 @@ def run_experiment(
             'n_drugs': len(drug_cols),
             'drugs': drug_cols,
             'config': config,
+            'pearson_alpha': pearson_alpha,
+            'lambda_kd': lambda_kd,
             'fold_metrics': all_fold_metrics,
             'avg': {k: {'mean': float(np.mean([m[k] for m in all_fold_metrics])),
                         'std': float(np.std([m[k] for m in all_fold_metrics]))}
