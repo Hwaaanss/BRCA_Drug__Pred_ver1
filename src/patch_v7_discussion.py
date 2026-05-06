@@ -4,6 +4,10 @@ import json
 import os
 from pathlib import Path
 from docx import Document
+try:
+    from docx_math_utils import add_math_paragraph, repair_document_math_text
+except ImportError:
+    from .docx_math_utils import add_math_paragraph, repair_document_math_text
 
 PROJECT_ROOT = Path(os.environ.get("BRCA_DRUG_PRED_ROOT", Path(__file__).resolve().parents[1])).resolve()
 SRC = PROJECT_ROOT / "research" / "PathOmicDRP_Full_Manuscript_v7.docx"
@@ -32,11 +36,13 @@ def main():
             anchor_el = p._p
             parent = anchor_el.getparent()
             idx = list(parent).index(anchor_el)
-            new_p = doc.add_paragraph(DISC, style='Normal')
+            new_p = add_math_paragraph(doc, DISC, style='Normal')
             parent.remove(new_p._p)
             parent.insert(idx + 1, new_p._p)
             break
+    repaired = repair_document_math_text(doc)
     doc.save(SRC)
+    print(f"Repaired {repaired} math-like paragraphs")
     print(f"Patched {SRC}")
 
 if __name__ == '__main__':

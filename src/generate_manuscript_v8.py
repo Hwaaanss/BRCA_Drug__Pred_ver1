@@ -42,6 +42,20 @@ from docx.shared import Pt, Inches
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from copy import deepcopy
 import numpy as np
+try:
+    from docx_math_utils import (
+        add_math_paragraph,
+        append_math_text,
+        repair_document_math_text,
+        set_paragraph_math_text,
+    )
+except ImportError:
+    from .docx_math_utils import (
+        add_math_paragraph,
+        append_math_text,
+        repair_document_math_text,
+        set_paragraph_math_text,
+    )
 
 PROJECT_ROOT = Path(os.environ.get("BRCA_DRUG_PRED_ROOT", Path(__file__).resolve().parents[1])).resolve()
 BASE = PROJECT_ROOT
@@ -71,10 +85,8 @@ def add_paragraph_after(doc, anchor_substr, texts, style=None):
 def insert_paragraphs_before(anchor_para, texts, style=None):
     """Insert a list of paragraphs before the anchor paragraph."""
     for text in texts:
-        new_p = anchor_para.insert_paragraph_before(text)
-        if style is not None:
-            try: new_p.style = style
-            except Exception: pass
+        new_p = anchor_para.insert_paragraph_before()
+        set_paragraph_math_text(new_p, text, style=style)
 
 
 def insert_paragraphs_after(doc, anchor_substr, texts, style=None):
@@ -86,7 +98,8 @@ def insert_paragraphs_after(doc, anchor_substr, texts, style=None):
                 anchor_next = doc.paragraphs[idx + 1]
                 insert_paragraphs_before(anchor_next, texts, style=style)
             else:
-                for t in texts: doc.add_paragraph(t, style=style) if style else doc.add_paragraph(t)
+                for t in texts:
+                    add_math_paragraph(doc, t, style=style)
             return True
     return False
 
@@ -264,10 +277,10 @@ def main():
             break
     if not inserted:
         # fallback: append to end of Results
-        doc.add_heading("SOTA benchmarking", level=3); doc.add_paragraph(R_SOTA)
-        doc.add_heading("Decision-curve analysis", level=3); doc.add_paragraph(R_DCA)
-        doc.add_heading("Biological validation", level=3); doc.add_paragraph(R_BIO)
-        doc.add_heading("CPTAC external validation", level=3); doc.add_paragraph(R_CPTAC)
+        doc.add_heading("SOTA benchmarking", level=3); add_math_paragraph(doc, R_SOTA)
+        doc.add_heading("Decision-curve analysis", level=3); add_math_paragraph(doc, R_DCA)
+        doc.add_heading("Biological validation", level=3); add_math_paragraph(doc, R_BIO)
+        doc.add_heading("CPTAC external validation", level=3); add_math_paragraph(doc, R_CPTAC)
 
     # --- Update Abstract to mention new analyses ---
     for p in doc.paragraphs:
@@ -282,10 +295,12 @@ def main():
                     "essentiality support, and confirm cross-cohort drug-response geometry "
                     "in CPTAC-BRCA (Pearson r=0.28, p=0.013)."
                 )
-                p.add_run(add_text)
+                append_math_text(p, add_text)
                 break
 
+    repaired = repair_document_math_text(doc)
     doc.save(DST)
+    print(f"Repaired {repaired} math-like paragraphs")
     print(f"Saved {DST}")
 
     # --- update a CHANGELOG-style README in research/ ---

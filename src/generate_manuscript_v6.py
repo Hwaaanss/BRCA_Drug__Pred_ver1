@@ -14,6 +14,18 @@ import os, json, shutil
 from pathlib import Path
 from docx import Document
 from copy import deepcopy
+try:
+    from docx_math_utils import (
+        insert_math_paragraph_after,
+        repair_document_math_text,
+        set_paragraph_math_text,
+    )
+except ImportError:
+    from .docx_math_utils import (
+        insert_math_paragraph_after,
+        repair_document_math_text,
+        set_paragraph_math_text,
+    )
 
 PROJECT_ROOT = Path(os.environ.get("BRCA_DRUG_PRED_ROOT", Path(__file__).resolve().parents[1])).resolve()
 RES = PROJECT_ROOT / "results"
@@ -197,13 +209,7 @@ def inject(doc, target_contains, insert_paragraphs):
 def replace_paragraph_text(doc, old_substring, new_text, strict=False):
     for p in doc.paragraphs:
         if old_substring in p.text:
-            # clear runs, set single run
-            for r in p.runs:
-                r.text = ""
-            if p.runs:
-                p.runs[0].text = new_text
-            else:
-                p.add_run(new_text)
+            set_paragraph_math_text(p, new_text)
             return True
     if strict:
         raise ValueError(f"Not found: {old_substring}")
@@ -212,37 +218,26 @@ def replace_paragraph_text(doc, old_substring, new_text, strict=False):
 
 def add_paragraph_after(doc, anchor_substr, text, style=None):
     """Add a new paragraph directly after the first paragraph containing anchor_substr."""
-    from docx.oxml.ns import qn
-    import copy as _copy
     for p in doc.paragraphs:
         if anchor_substr in p.text:
-            new_p = _copy.deepcopy(p._p)
-            # wipe children
-            for r in list(new_p):
-                new_p.remove(r)
-            p._p.addnext(new_p)
-            # Build paragraph object via python-docx API: fetch via iteration
-            # Simpler: use doc.add_paragraph then move
-            break
-    else:
-        return None
-
-    # Rebuild by re-reading
-    # Remove the empty clone and use proper paragraph creation
-    parent = p._p.getparent()
-    idx = list(parent).index(p._p)
-    # Create a new proper paragraph from doc object
-    from docx.oxml import OxmlElement
-    new_para = doc.add_paragraph(text, style=style or 'Normal')
-    # Move the just-appended paragraph (at end) to right after anchor
-    parent.remove(new_p)
-    parent.remove(new_para._p)
-    parent.insert(idx+1, new_para._p)
-    return new_para
+            return insert_math_paragraph_after(p, text, style=style or 'Normal')
+    return None
 
 
 def main():
     r = load_all()
+    if not SRC.exists():
+        if DST.exists():
+            doc = Document(DST)
+            repaired = repair_document_math_text(doc)
+            doc.save(DST)
+            print(f"Source manuscript not found: {SRC}")
+            print(f"Kept existing {DST}")
+            print(f"Repaired {repaired} math-like paragraphs")
+            return
+        raise FileNotFoundError(
+            f"Neither source manuscript nor existing v6 manuscript is available: {SRC}, {DST}"
+        )
     shutil.copy(SRC, DST)
     doc = Document(DST)
 
@@ -369,7 +364,9 @@ def main():
         "are reported to quantify uncertainty under small outcome-imbalanced subsets.",
     )
 
+    repaired = repair_document_math_text(doc)
     doc.save(DST)
+    print(f"Repaired {repaired} math-like paragraphs")
     print(f"Saved {DST}")
 
 

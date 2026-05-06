@@ -14,6 +14,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 PROJECT_ROOT = Path(os.environ.get("BRCA_DRUG_PRED_ROOT", Path(__file__).resolve().parents[1])).resolve()
+DATA_ROOT = Path(os.environ.get("BRCA_DRUG_PRED_DATA_ROOT", PROJECT_ROOT / "data")).resolve()
 BASE = PROJECT_ROOT
 RES = PROJECT_ROOT / "results" / "reinforce"
 FIG = PROJECT_ROOT / "research" / "figures" / "figures_v6"
@@ -79,7 +80,7 @@ def fig_metabric():
 
     # Panel A: Biomarker concordance (box plots)
     # Load clinical
-    cl = pd.read_csv(f"{BASE}/08_metabric/data_clinical_sample.txt", sep="\t", comment='#',
+    cl = pd.read_csv(DATA_ROOT / "08_metabric" / "data_clinical_sample.txt", sep="\t", comment='#',
                      low_memory=False)
     merged = pred.merge(cl[['SAMPLE_ID', 'ER_STATUS', 'HER2_STATUS']],
                         left_index=True, right_on='SAMPLE_ID', how='inner')
@@ -112,7 +113,7 @@ def fig_metabric():
     # Panel B: Drug-drug correlation conservation (scatter)
     ax = axes[1]
     corr = mb['drug_drug_correlation_conservation']
-    tcga_ic = pd.read_csv(f"{BASE}/07_integrated/predicted_IC50_all_drugs.csv", index_col=0)
+    tcga_ic = pd.read_csv(DATA_ROOT / "07_integrated" / "predicted_IC50_all_drugs.csv", index_col=0)
     DRUGS = list(pred.columns)
     t_corr = tcga_ic[DRUGS].corr(method='spearman').values
     m_corr = pred[DRUGS].corr(method='spearman').values

@@ -17,6 +17,7 @@ import matplotlib.pyplot as plt
 plt.rcParams.update({'font.size': 9, 'pdf.fonttype': 42, 'ps.fonttype': 42})
 
 PROJECT_ROOT = Path(os.environ.get("BRCA_DRUG_PRED_ROOT", Path(__file__).resolve().parents[1])).resolve()
+DATA_ROOT = Path(os.environ.get("BRCA_DRUG_PRED_DATA_ROOT", PROJECT_ROOT / "data")).resolve()
 ROOT = PROJECT_ROOT
 OUT = PROJECT_ROOT / "research" / "figures" / "figures_v8"
 os.makedirs(OUT, exist_ok=True)
@@ -119,10 +120,10 @@ def fig_cptac_biomarkers():
     from io import StringIO
     d = json.load(open(f"{ROOT}/results/cptac_validation/biomarker_concordance.json"))
     pred = pd.read_csv(f"{ROOT}/results/cptac_validation/cptac_predicted_IC50.csv", index_col=0)
-    with open(f"{ROOT}/10_cptac/data_clinical_patient.txt") as f:
+    with open(DATA_ROOT / "10_cptac" / "data_clinical_patient.txt") as f:
         lines = [l for l in f if not l.startswith('#')]
     cp = pd.read_csv(StringIO(''.join(lines)), sep='\t')
-    with open(f"{ROOT}/10_cptac/data_clinical_sample.txt") as f:
+    with open(DATA_ROOT / "10_cptac" / "data_clinical_sample.txt") as f:
         lines = [l for l in f if not l.startswith('#')]
     cs = pd.read_csv(StringIO(''.join(lines)), sep='\t')
     clin = cs.merge(cp, on='PATIENT_ID', how='left').set_index('SAMPLE_ID')
@@ -139,7 +140,7 @@ def fig_cptac_biomarkers():
         s = clin[col].astype(str).str.lower()
         a = pred.loc[clin.index[s == values[0]].intersection(pred.index), drug].dropna()
         b = pred.loc[clin.index[s == values[1]].intersection(pred.index), drug].dropna()
-        bp = ax.boxplot([a, b], labels=[f"{labels[0]}\n(n={len(a)})", f"{labels[1]}\n(n={len(b)})"],
+        bp = ax.boxplot([a, b], tick_labels=[f"{labels[0]}\n(n={len(a)})", f"{labels[1]}\n(n={len(b)})"],
                         patch_artist=True, widths=0.5)
         bp['boxes'][0].set_facecolor('#c0392b'); bp['boxes'][1].set_facecolor('#2980b9')
         for box in bp['boxes']: box.set_alpha(0.7)

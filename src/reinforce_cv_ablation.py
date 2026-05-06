@@ -71,7 +71,11 @@ def evaluate_with_ablation(model, loader, scalers, drop=None):
         try: r, _ = pearsonr(T[:, i], P[:, i])
         except Exception: r = 0.0
         per_drug.append(float(r))
-    return float(np.mean(per_drug)), per_drug
+    try:
+        pcc_global, _ = pearsonr(T.flatten(), P.flatten())
+    except Exception:
+        pcc_global = 0.0
+    return float(np.mean(per_drug)), per_drug, float(pcc_global)
 
 
 def main():
@@ -153,9 +157,15 @@ def main():
         fold_res = {}
         for cond in conditions:
             drop_name = None if cond == 'full' else cond.replace('drop_', '')
-            mean_pcc, per_drug = evaluate_with_ablation(model, va_loader, tr_ds.scalers, drop=drop_name)
-            fold_res[cond] = {'pcc_drug_mean': mean_pcc, 'per_drug': per_drug}
-            log(f"  {cond:25s}: PCC_drug={mean_pcc:.4f}")
+            mean_pcc, per_drug, pcc_global = evaluate_with_ablation(
+                model, va_loader, tr_ds.scalers, drop=drop_name
+            )
+            fold_res[cond] = {
+                'pcc_drug_mean': mean_pcc,
+                'pcc_global': pcc_global,
+                'per_drug': per_drug,
+            }
+            log(f"  {cond:25s}: PCC_drug={mean_pcc:.4f} PCC_global={pcc_global:.4f}")
         fold_results.append(fold_res)
 
         with open(os.path.join(OUT_DIR, 'cv_ablation_partial.json'), 'w') as f:
@@ -165,18 +175,28 @@ def main():
     summary = {'drugs': DRUGS, 'conditions': conditions, 'per_fold': fold_results}
     agg = {}
     full_means = np.array([fr['full']['pcc_drug_mean'] for fr in fold_results])
+    full_globals = np.array([fr['full'].get('pcc_global', np.nan) for fr in fold_results], dtype=float)
     for cond in conditions:
         vals = np.array([fr[cond]['pcc_drug_mean'] for fr in fold_results])
         drops = full_means - vals
+        global_vals = np.array([fr[cond].get('pcc_global', np.nan) for fr in fold_results], dtype=float)
         agg[cond] = {
             'pcc_drug_mean_per_fold': vals.tolist(),
             'pcc_drug_mean': float(vals.mean()),
             'pcc_drug_std':  float(vals.std(ddof=1)),
+            'pcc_global_per_fold': global_vals.tolist(),
+            'pcc_global_mean': float(np.nanmean(global_vals)),
+            'pcc_global_std': float(np.nanstd(global_vals, ddof=1)),
             'drop_per_fold': drops.tolist(),
             'drop_mean': float(drops.mean()),
             'drop_std':  float(drops.std(ddof=1)),
             'drop_ci95': [float(np.percentile(drops, 2.5)), float(np.percentile(drops, 97.5))],
         }
+        global_drops = full_globals - global_vals
+        if not np.isnan(global_drops).all():
+            agg[cond]['pcc_global_drop_per_fold'] = global_drops.tolist()
+            agg[cond]['pcc_global_drop_mean'] = float(np.nanmean(global_drops))
+            agg[cond]['pcc_global_drop_std'] = float(np.nanstd(global_drops, ddof=1))
     # Relative importance (share of total drop across modalities)
     drop_means = {c: agg[c]['drop_mean'] for c in conditions if c != 'full'}
     total = sum(max(0, v) for v in drop_means.values()) or 1e-9

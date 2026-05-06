@@ -7,9 +7,9 @@
 4. CPTAC-BRCA 3-modal external validation — Fig S20, Fig S21
 
 ## Key numbers
-- SOTA benchmarking: PathomicFusion 0.339 ± 0.049; MOLI 0.663 ± 0.049; SuperFELT 0.629 ± 0.032; PathOmicDRP 0.237 ± 0.041
-- Biological validation: 11/255 genes significant in both TCGA+METABRIC, concordant direction
-- CPTAC drug-drug corr-of-corrs: r=0.281, p=0.0128
+- SOTA benchmarking: PathomicFusion 0.368 ± 0.047; MOLI 0.644 ± 0.041; SuperFELT 0.631 ± 0.028; PathOmicDRP 0.226 ± 0.044
+- Biological validation: 10/183 genes significant in both TCGA+METABRIC, concordant direction
+- CPTAC drug-drug corr-of-corrs: r=0.656, p=7.14e-11
 - CPTAC biomarker concordance: 3/5 direction-concordant
 
 ## Target journal: Genome Medicine (shift from npj Digital Medicine)

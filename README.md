@@ -177,18 +177,27 @@ This project is licensed under the MIT License.
 ## Create reports
 ```bash
 python src/reinforce_cv_ablation.py
+python src/oof_predictions.py
+python src/extract_embeddings_attention.py
+
+python src/strengthening_analyses.py
+python src/w1w2w3_resolution.py
+python src/strengthening_abc.py
+python src/advanced_analysis.py
+
 python src/reinforce_fair_embedding.py
 python src/reinforce_metabric.py
 python src/reinforce_drug_heterogeneity.py
-python src/oof_predictions.py
-python src/extract_embeddings_attention.py
+python src/create_analysis6_clinical_auc_comparison.py
 python src/clinical_utility_v2.py
 python src/biological_validation.py
 python src/cptac_validation.py
 python src/sota_benchmark.py
+
 python src/reinforce_figures.py
 python src/figures_v8.py
 python -m src.figures_v8_nature.run_all
+
 python src/generate_manuscript_v6.py
 python src/generate_manuscript_v7.py
 python src/patch_v7_discussion.py

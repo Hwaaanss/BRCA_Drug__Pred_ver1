@@ -1,11 +1,11 @@
 {
-  "n_top_union_genes": 255,
-  "n_matched_depmap": 249,
-  "n_depmap_essential_gte_0p5_in_majority": 57,
-  "n_tcga_cox_tested": 255,
-  "n_tcga_cox_sig_0p05": 29,
-  "n_metabric_cox_tested": 252,
-  "n_metabric_cox_sig_0p05": 129,
-  "n_concordant_sig_both": 11,
-  "n_concordant_any_direction": 180
+  "n_top_union_genes": 183,
+  "n_matched_depmap": 180,
+  "n_depmap_essential_gte_0p5_in_majority": 16,
+  "n_tcga_cox_tested": 183,
+  "n_tcga_cox_sig_0p05": 12,
+  "n_metabric_cox_tested": 179,
+  "n_metabric_cox_sig_0p05": 113,
+  "n_concordant_sig_both": 10,
+  "n_concordant_any_direction": 141
 }

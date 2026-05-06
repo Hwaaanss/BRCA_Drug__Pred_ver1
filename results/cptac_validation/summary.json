@@ -3,17 +3,17 @@
   "gene_panel_coverage": 0.9583333333333334,
   "transcriptomic_missing": 127,
   "drug_corr_of_corrs": {
-    "pearson_r": 0.2806584164022053,
-    "p": 0.01281272900222426
+    "pearson_r": 0.6559002441825604,
+    "p": 7.136391986607119e-11
   },
   "n_biomarkers_concordant_direction": 3,
   "n_biomarkers_tested": 5,
-  "n_strong_confounders_flagged": 7,
+  "n_strong_confounders_flagged": 22,
   "strong_confounders_examples": [
+    "ESTIMATE_TUMORPURITY | Cisplatin_1005",
+    "ESTIMATE_TUMORPURITY | Docetaxel_1007",
     "ESTIMATE_TUMORPURITY | Paclitaxel_1080",
-    "ESTIMATE_TUMORPURITY | Venetoclax_1909",
-    "ESTIMATE_STROMAL_SCORE | Paclitaxel_1080",
-    "ESTIMATE_STROMAL_SCORE | Vinblastine_1004",
-    "ESTIMATE_STROMAL_SCORE | Venetoclax_1909"
+    "ESTIMATE_TUMORPURITY | Gemcitabine_1190",
+    "ESTIMATE_TUMORPURITY | Tamoxifen_1199"
   ]
 }

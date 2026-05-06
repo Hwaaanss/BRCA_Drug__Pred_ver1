@@ -43,6 +43,7 @@ DATA_ROOT = Path(os.environ.get("BRCA_DRUG_PRED_DATA_ROOT", PROJECT_ROOT / "data
 
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 from train_phase3_4modal import MultiDrugDataset4Modal, collate_4modal
+from model import PathOmicDRP, get_default_config
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 BASE = DATA_ROOT / "07_integrated"
@@ -264,6 +265,92 @@ def select_features_elasticnet(X, Y, k):
     return np.argsort(coefs)[-k:].tolist()
 
 
+def safe_std(vals):
+    """Sample std for fold metrics, with 0 for a single fold."""
+    vals = np.asarray(vals, dtype=float)
+    return float(np.std(vals, ddof=1)) if len(vals) > 1 else 0.0
+
+
+@torch.no_grad()
+def evaluate_pathomicdrp_reference(common, gen_df, tra_df, pro_df, ic50_df,
+                                   gen_dim, tra_dim, pro_dim):
+    """Recover PathOmicDRP PCC metrics from saved CV fold models.
+
+    Older cv_ablation.json files only stored per-drug PCC.  The SOTA table also
+    needs global PCC, so reuse the saved fold models when available instead of
+    forcing a full retrain.
+    """
+    fold_paths = [OUT.parent / "reinforce" / f"fold{i}_model.pt" for i in range(1, 6)]
+    if not all(p.exists() for p in fold_paths):
+        missing = [str(p) for p in fold_paths if not p.exists()]
+        raise FileNotFoundError(f"missing PathOmicDRP fold models: {missing}")
+
+    config = get_default_config(
+        genomic_dim=gen_dim, n_pathways=tra_dim,
+        proteomic_dim=pro_dim, n_drugs=len(DRUGS), use_histology=True,
+    )
+    config['task'] = 'regression'
+    config['modality_dropout'] = 0.1
+    config['hidden_dim'] = 256
+
+    kf = KFold(n_splits=5, shuffle=True, random_state=42)
+    folds = []
+    for fold, (tr_idx, va_idx) in enumerate(kf.split(common)):
+        tr_ids = [common[i] for i in tr_idx]
+        va_ids = [common[i] for i in va_idx]
+        tr_ds = MultiDrugDataset4Modal(
+            tr_ids, gen_df, tra_df, pro_df, ic50_df, DRUGS,
+            histo_dir=None, fit=True,
+        )
+        va_ds = MultiDrugDataset4Modal(
+            va_ids, gen_df, tra_df, pro_df, ic50_df, DRUGS,
+            histo_dir=HISTO_DIR, scalers=tr_ds.scalers,
+        )
+        va_loader = DataLoader(
+            va_ds, batch_size=BATCH, shuffle=False, num_workers=0,
+            collate_fn=collate_4modal,
+        )
+
+        model = PathOmicDRP(config).to(DEVICE)
+        state = torch.load(fold_paths[fold], map_location=DEVICE, weights_only=True)
+        model.load_state_dict(state)
+        model.eval()
+
+        preds, trues = [], []
+        for b in va_loader:
+            g = b['genomic'].to(DEVICE)
+            t = b['transcriptomic'].to(DEVICE)
+            p = b['proteomic'].to(DEVICE)
+            y = b['target'].to(DEVICE)
+            kw = {
+                'histology': b['histology'].to(DEVICE),
+                'histo_mask': b['histo_mask'].to(DEVICE),
+            }
+            out = model(g, t, p, **kw)['prediction']
+            preds.append(out.cpu().numpy())
+            trues.append(y.cpu().numpy())
+
+        P = va_ds.scalers['ic50'].inverse_transform(np.concatenate(preds))
+        T = va_ds.scalers['ic50'].inverse_transform(np.concatenate(trues))
+        per_drug = []
+        for j in range(P.shape[1]):
+            try:
+                r, _ = pearsonr(T[:, j], P[:, j])
+            except Exception:
+                r = 0.0
+            per_drug.append(float(r))
+        try:
+            pcc_global, _ = pearsonr(T.flatten(), P.flatten())
+        except Exception:
+            pcc_global = 0.0
+        folds.append({
+            'pcc_drug_mean': float(np.mean(per_drug)),
+            'pcc_drug_per': per_drug,
+            'pcc_global': float(pcc_global),
+        })
+    return folds
+
+
 def main():
     gen_df = pd.read_csv(os.path.join(BASE, "X_genomic.csv"))
     tra_df = pd.read_csv(os.path.join(BASE, "X_transcriptomic.csv"))
@@ -335,11 +422,13 @@ def main():
         drugs_mean = np.mean([f['pcc_drug_mean'] for f in folds])
         drugs_std = np.std([f['pcc_drug_mean'] for f in folds], ddof=1)
         global_mean = np.mean([f['pcc_global'] for f in folds])
+        global_std = safe_std([f['pcc_global'] for f in folds])
         per_drug_arr = np.array([f['pcc_drug_per'] for f in folds])  # (5, 13)
         agg[m] = {
             'pcc_drug_mean_mean': float(drugs_mean),
             'pcc_drug_mean_std': float(drugs_std),
             'pcc_global_mean': float(global_mean),
+            'pcc_global_std': float(global_std),
             'per_drug_mean': per_drug_arr.mean(axis=0).tolist(),
             'per_drug_std': per_drug_arr.std(axis=0, ddof=1).tolist(),
         }
@@ -350,12 +439,28 @@ def main():
         full = ref['aggregate']['full']
         # per_drug from per_fold full
         pdrug = np.array([f['full']['per_drug'] for f in ref['per_fold']])
+        pglobal_folds = [
+            f['full']['pcc_global'] for f in ref['per_fold']
+            if 'pcc_global' in f.get('full', {})
+        ]
+        if len(pglobal_folds) != len(ref['per_fold']):
+            log("PathOmicDRP PCC_global missing in cv_ablation.json; recovering from saved fold models")
+            try:
+                pathomic_folds = evaluate_pathomicdrp_reference(
+                    common, gen_df, tra_df, pro_df, ic50_df, gen_dim, tra_dim, pro_dim
+                )
+                pglobal_folds = [f['pcc_global'] for f in pathomic_folds]
+            except Exception as e:
+                log(f"PathOmicDRP PCC_global recovery fail: {e}")
         agg['PathOmicDRP'] = {
             'pcc_drug_mean_mean': full['pcc_drug_mean'],
             'pcc_drug_mean_std': full['pcc_drug_std'],
             'per_drug_mean': pdrug.mean(axis=0).tolist(),
             'per_drug_std': pdrug.std(axis=0, ddof=1).tolist(),
         }
+        if pglobal_folds:
+            agg['PathOmicDRP']['pcc_global_mean'] = float(np.mean(pglobal_folds))
+            agg['PathOmicDRP']['pcc_global_std'] = safe_std(pglobal_folds)
     except Exception as e:
         log(f"ref load fail: {e}")
 
@@ -366,7 +471,13 @@ def main():
     # per-drug wide table
     rows = []
     for m, a in agg.items():
-        row = {'method': m, 'pcc_drug_mean_mean': a.get('pcc_drug_mean_mean')}
+        row = {
+            'method': m,
+            'pcc_global_mean': a.get('pcc_global_mean'),
+            'pcc_global_std': a.get('pcc_global_std'),
+            'pcc_drug_mean_mean': a.get('pcc_drug_mean_mean'),
+            'pcc_drug_mean_std': a.get('pcc_drug_mean_std'),
+        }
         for j, d in enumerate(DRUGS):
             row[d] = a['per_drug_mean'][j]
         rows.append(row)
@@ -374,7 +485,9 @@ def main():
     log("Saved sota_comparison.json + sota_per_drug.csv")
     for m, a in agg.items():
         log(f"  {m:16s}: PCC_drug = {a.get('pcc_drug_mean_mean', float('nan')):.4f} "
-            f"± {a.get('pcc_drug_mean_std', 0):.4f}")
+            f"± {a.get('pcc_drug_mean_std', 0):.4f}; "
+            f"PCC_global = {a.get('pcc_global_mean', float('nan')):.4f} "
+            f"± {a.get('pcc_global_std', 0):.4f}")
 
 if __name__ == '__main__':
     main()

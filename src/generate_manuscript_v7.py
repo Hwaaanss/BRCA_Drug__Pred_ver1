@@ -17,6 +17,10 @@ import os, json, shutil
 from pathlib import Path
 from docx import Document
 from copy import deepcopy
+try:
+    from docx_math_utils import add_math_paragraph, repair_document_math_text, set_paragraph_math_text
+except ImportError:
+    from .docx_math_utils import add_math_paragraph, repair_document_math_text, set_paragraph_math_text
 
 PROJECT_ROOT = Path(os.environ.get("BRCA_DRUG_PRED_ROOT", Path(__file__).resolve().parents[1])).resolve()
 RES = PROJECT_ROOT / "results"
@@ -27,9 +31,7 @@ DST = PROJECT_ROOT / "research" / "PathOmicDRP_Full_Manuscript_v7.docx"
 def replace_paragraph_text(doc, old_substring, new_text, strict=False):
     for p in doc.paragraphs:
         if old_substring in p.text:
-            for r in p.runs: r.text = ""
-            if p.runs: p.runs[0].text = new_text
-            else: p.add_run(new_text)
+            set_paragraph_math_text(p, new_text)
             return True
     if strict:
         raise ValueError(f"Not found: {old_substring}")
@@ -47,10 +49,10 @@ def add_paragraph_after(doc, anchor_substr, texts, heading=None):
             # Build new paragraphs by using doc.add_paragraph then moving
             created = []
             if heading:
-                np_ = doc.add_paragraph(heading, style='Heading 3')
+                np_ = add_math_paragraph(doc, heading, style='Heading 3')
                 created.append(np_)
             for t in texts:
-                created.append(doc.add_paragraph(t, style='Normal'))
+                created.append(add_math_paragraph(doc, t, style='Normal'))
             # Move each to after anchor in order
             for np_ in created:
                 parent.remove(np_._p)
@@ -222,7 +224,9 @@ def main():
         "most valuable.",
     )
 
+    repaired = repair_document_math_text(doc)
     doc.save(DST)
+    print(f"Repaired {repaired} math-like paragraphs")
     print(f"Saved {DST}")
 
 

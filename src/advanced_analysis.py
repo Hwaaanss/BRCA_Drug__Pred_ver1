@@ -457,6 +457,22 @@ def umap_analysis(embeddings, pids, subtype_results, surv_df, pred_ic50, drug_co
 
     log(f"  Reduced {embeddings.shape} → {coords.shape}")
 
+    sub_df = subtype_results.get('subtype_df', pd.DataFrame())
+    rows = []
+    for i, pid in enumerate(pids):
+        row = {
+            'patient_id': pid,
+            'x': float(coords[i, 0]),
+            'y': float(coords[i, 1]),
+            'subtype': 'Other',
+        }
+        if not sub_df.empty and pid in sub_df.index:
+            row['subtype'] = sub_df.loc[pid, 'subtype']
+        rows.append(row)
+    umap_df = pd.DataFrame(rows)
+    umap_df.to_csv(os.path.join(OUT_DIR, 'umap_embedding_data.csv'), index=False)
+    log(f"  Saved {OUT_DIR}/umap_embedding_data.csv")
+
     return coords
 
 

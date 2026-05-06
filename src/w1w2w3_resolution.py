@@ -63,11 +63,13 @@ def save_json(data, path):
 def load_data():
     """Load all data needed across analyses."""
     log("Loading data...")
-    gen_df = pd.read_csv(f"{BASE}/07_integrated/X_genomic.csv")
-    tra_df = pd.read_csv(f"{BASE}/07_integrated/X_transcriptomic.csv")
-    pro_df = pd.read_csv(f"{BASE}/07_integrated/X_proteomic.csv")
-    ic50_df = pd.read_csv(f"{BASE}/07_integrated/predicted_IC50_all_drugs.csv", index_col=0)
-    drug_df = pd.read_csv(f"{BASE}/01_clinical/TCGA_BRCA_drug_treatments.csv")
+    integrated_dir = DATA_ROOT / "07_integrated"
+    clinical_dir = DATA_ROOT / "01_clinical"
+    gen_df = pd.read_csv(integrated_dir / "X_genomic.csv")
+    tra_df = pd.read_csv(integrated_dir / "X_transcriptomic.csv")
+    pro_df = pd.read_csv(integrated_dir / "X_proteomic.csv")
+    ic50_df = pd.read_csv(integrated_dir / "predicted_IC50_all_drugs.csv", index_col=0)
+    drug_df = pd.read_csv(clinical_dir / "TCGA_BRCA_drug_treatments.csv")
 
     hids = {f.replace('.pt','') for f in os.listdir(HISTO_DIR) if f.endswith('.pt')}
 
