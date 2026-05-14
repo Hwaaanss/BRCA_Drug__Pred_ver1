@@ -21,10 +21,20 @@ from scipy.stats import pearsonr, spearmanr
 
 from model import PathOmicDRP, get_default_config
 from dataset import PathOmicDataset, collate_fn, load_data
+from training_plots import save_loss_curves
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 PROJECT_ROOT = Path(os.environ.get("BRCA_DRUG_PRED_ROOT", Path(__file__).resolve().parents[1])).resolve()
 DATA_ROOT = Path(os.environ.get("BRCA_DRUG_PRED_DATA_ROOT", PROJECT_ROOT / "data")).resolve()
+LOSS_PLOT_DIR = PROJECT_ROOT / "results" / "loss_plot"
+
+
+def _fmt_lr(lr: float) -> str:
+    s = f"{lr:.0e}"
+    base, exp = s.split('e')
+    sign = exp[0]
+    num = str(int(exp[1:]))
+    return f"{base}e{sign}{num}"
 
 
 # ---------------------------------------------------------------------------
@@ -231,6 +241,7 @@ def run_cross_validation(
         split_iter = kf.split(common)
 
     all_fold_metrics = []
+    loss_histories = []
 
     for fold, (train_idx, val_idx) in enumerate(split_iter):
         print(f"\n{'='*60}")
@@ -274,6 +285,7 @@ def run_cross_validation(
         early_stopping = EarlyStopping(patience=15)
         best_val_loss = float('inf')
         best_model_state = None
+        loss_history = {'fold': fold + 1, 'epoch': [], 'train_loss': [], 'val_loss': []}
 
         for epoch in range(n_epochs):
             train_out = train_one_epoch(
@@ -281,6 +293,11 @@ def run_cross_validation(
             )
             val_metrics, _, _ = evaluate(model, val_loader, criterion, DEVICE)
             scheduler.step()
+
+            train_loss_value = train_out['reg_loss'] if isinstance(train_out, dict) else train_out
+            loss_history['epoch'].append(epoch + 1)
+            loss_history['train_loss'].append(float(train_loss_value))
+            loss_history['val_loss'].append(float(val_metrics['loss']))
 
             if val_metrics['loss'] < best_val_loss:
                 best_val_loss = val_metrics['loss']
@@ -312,6 +329,7 @@ def run_cross_validation(
 
         # Save fold model
         torch.save(best_model_state, os.path.join(output_dir, f"fold{fold+1}_model.pt"))
+        loss_histories.append(loss_history)
 
     # Aggregate results
     print(f"\n{'='*60}")
@@ -332,6 +350,8 @@ def run_cross_validation(
             'fold_metrics': all_fold_metrics,
             'avg_metrics': avg_metrics,
         }, f, indent=2, default=str)
+    plot_filename = f"phase1_omics_baseline_lr{_fmt_lr(lr)}.png"
+    save_loss_curves(loss_histories, LOSS_PLOT_DIR, plot_filename, title="Phase 1 Loss Curves")
 
     return avg_metrics
 
@@ -341,6 +361,10 @@ def run_cross_validation(
 # ---------------------------------------------------------------------------
 
 if __name__ == '__main__':
+    _cfg_path = PROJECT_ROOT / "configs" / "train_phase1.json"
+    with open(_cfg_path) as _f:
+        _train_cfg = json.load(_f)
+
     print(f"Device: {DEVICE}")
     print(f"Loading data...")
 
@@ -358,11 +382,11 @@ if __name__ == '__main__':
         genomic_dim=genomic_dim,
         n_pathways=n_pathways,
         proteomic_dim=proteomic_dim,
-        n_drugs=1,
-        use_histology=False,
+        n_drugs=_train_cfg.get('n_drugs', 1),
+        use_histology=_train_cfg.get('use_histology', False),
     )
-    config['task'] = 'classification'
-    config['modality_dropout'] = 0.15
+    config['task'] = _train_cfg.get('task', 'classification')
+    config['modality_dropout'] = _train_cfg.get('modality_dropout', 0.15)
 
     print(f"\n{'='*60}")
     print("Phase 1: Omics-only Baseline (3-modal)")
@@ -372,10 +396,10 @@ if __name__ == '__main__':
         data=data,
         targets=targets,
         config=config,
-        n_folds=5,
-        n_epochs=100,
-        batch_size=32,
-        lr=5e-4,
-        weight_decay=1e-4,
+        n_folds=_train_cfg.get('n_folds', 5),
+        n_epochs=_train_cfg.get('n_epochs', 100),
+        batch_size=_train_cfg.get('batch_size', 32),
+        lr=_train_cfg.get('lr', 5e-4),
+        weight_decay=_train_cfg.get('weight_decay', 1e-4),
         output_dir=PROJECT_ROOT / "results" / "phase1_omics_baseline",
     )

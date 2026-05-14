@@ -20,12 +20,22 @@ from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
 from scipy.stats import pearsonr, spearmanr
 
 from model import PathOmicDRP, get_default_config
+from training_plots import save_loss_curves
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 BASE = os.path.join(ROOT, "data", "07_integrated")
 RESULTS = os.path.join(ROOT, "results")
+LOSS_PLOT_DIR = os.path.join(ROOT, "results", "loss_plot")
 ONCOPREDICT_ZIP = os.path.join(ROOT, "data", "oncopredict_training", "DataFiles.zip")
+
+
+def _fmt_lr(lr: float) -> str:
+    s = f"{lr:.0e}"
+    base, exp = s.split('e')
+    sign = exp[0]
+    num = str(int(exp[1:]))
+    return f"{base}e{sign}{num}"
 
 
 def require_file(path, description):
@@ -347,6 +357,11 @@ def run_experiment(
     n_epochs=150,
     batch_size=32,
     lr=3e-4,
+    weight_decay=1e-4,
+    pearson_alpha=0.2,
+    patience=20,
+    modality_dropout=0.1,
+    hidden_dim=256,
     tag="3modal",
 ):
     print(f"\n{'='*70}")
@@ -398,15 +413,15 @@ def run_experiment(
         use_histology=False,
     )
     config['task'] = 'regression'
-    config['modality_dropout'] = 0.1
-    config['hidden_dim'] = 256
-    pearson_alpha = 0.2
+    config['modality_dropout'] = modality_dropout
+    config['hidden_dim'] = hidden_dim
     lambda_kd = float(config.get('lambda_kd', 0.0)) if config.get('use_kd_gnn', False) else 0.0
 
     # 5-fold CV
     kf = KFold(n_splits=n_folds, shuffle=True, random_state=42)
     all_fold_metrics = []
     all_drug_metrics = []
+    loss_histories = []
 
     for fold, (train_idx, val_idx) in enumerate(kf.split(common)):
         train_ids = [common[i] for i in train_idx]
@@ -424,14 +439,14 @@ def run_experiment(
         val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=2)
 
         model = PathOmicDRP(config).to(DEVICE)
-        optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
+        optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=n_epochs, eta_min=lr * 0.01)
         criterion = nn.HuberLoss(delta=1.0)
 
         best_loss = float('inf')
         best_state = None
-        patience = 20
         patience_counter = 0
+        loss_history = {'fold': fold + 1, 'epoch': [], 'train_loss': [], 'val_loss': []}
 
         for epoch in range(n_epochs):
             train_loss = train_epoch(
@@ -440,6 +455,10 @@ def run_experiment(
             )
             val_metrics, _, _, _ = evaluate(model, val_loader, criterion, train_ds.scalers, drug_cols)
             scheduler.step()
+
+            loss_history['epoch'].append(epoch + 1)
+            loss_history['train_loss'].append(float(train_loss))
+            loss_history['val_loss'].append(float(val_metrics['loss']))
 
             if val_metrics['loss'] < best_loss:
                 best_loss = val_metrics['loss']
@@ -463,6 +482,7 @@ def run_experiment(
         final_metrics, drug_met, _, _ = evaluate(model, val_loader, criterion, train_ds.scalers, drug_cols)
         all_fold_metrics.append(final_metrics)
         all_drug_metrics.append(drug_met)
+        loss_histories.append(loss_history)
 
         print(f"  Fold {fold+1} FINAL | PCC_global={final_metrics['pcc_global']:.4f} | "
               f"PCC_drug_mean={final_metrics['pcc_per_drug_mean']:.4f} | "
@@ -486,6 +506,8 @@ def run_experiment(
     # Save
     out_dir = os.path.join(RESULTS, f"phase2_{tag}")
     os.makedirs(out_dir, exist_ok=True)
+    plot_filename = f"phase2_{tag}_lr{_fmt_lr(lr)}.png"
+    save_loss_curves(loss_histories, LOSS_PLOT_DIR, plot_filename, title=f"Phase 2 {tag} Loss Curves")
     with open(os.path.join(out_dir, "cv_results.json"), 'w') as f:
         json.dump({
             'tag': tag,
@@ -505,24 +527,41 @@ def run_experiment(
 
 
 if __name__ == '__main__':
+    _cfg_path = os.path.join(ROOT, "configs", "train_phase2.json")
+    with open(_cfg_path) as _f:
+        _train_cfg = json.load(_f)
+
+    _shared = dict(
+        n_drugs=_train_cfg.get('n_drugs', 13),
+        n_folds=_train_cfg.get('n_folds', 5),
+        n_epochs=_train_cfg.get('n_epochs', 150),
+        batch_size=_train_cfg.get('batch_size', 32),
+        lr=_train_cfg.get('lr', 3e-4),
+        weight_decay=_train_cfg.get('weight_decay', 1e-4),
+        pearson_alpha=_train_cfg.get('pearson_alpha', 0.2),
+        patience=_train_cfg.get('patience', 20),
+        modality_dropout=_train_cfg.get('modality_dropout', 0.1),
+        hidden_dim=_train_cfg.get('hidden_dim', 256),
+    )
+
     print(f"Device: {DEVICE}")
 
     # --- Experiment 1: Full 3-modal (Genomic + Transcriptomic + Proteomic) ---
     full_metrics = run_experiment(
         modalities=('genomic', 'transcriptomic', 'proteomic'),
-        n_drugs=13, tag="3modal_full"
+        tag="3modal_full", **_shared
     )
 
     # --- Ablation: Transcriptomic only ---
     trans_metrics = run_experiment(
         modalities=('transcriptomic',),
-        n_drugs=13, tag="ablation_trans_only"
+        tag="ablation_trans_only", **_shared
     )
 
     # --- Ablation: Genomic + Transcriptomic (no proteomic) ---
     gen_trans_metrics = run_experiment(
         modalities=('genomic', 'transcriptomic'),
-        n_drugs=13, tag="ablation_gen_trans"
+        tag="ablation_gen_trans", **_shared
     )
 
     # --- Summary ---
