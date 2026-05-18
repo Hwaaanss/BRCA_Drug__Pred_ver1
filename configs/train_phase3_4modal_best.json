@@ -1,0 +1,16 @@
+{
+  "n_folds": 5,
+  "n_epochs": 150,
+  "lr": 0.0005252415372183196,
+  "weight_decay": 0.0029230214622090783,
+  "n_drugs": 13,
+  "task": "regression",
+  "modality_dropout": 0.2716423694988295,
+  "hidden_dim": 256,
+  "pearson_alpha": 0.15091266858842314,
+  "patience": 20,
+  "batch_size_3modal": 64,
+  "batch_size_4modal": 64,
+  "batch_size": 64,
+  "_hpo_n_trials": 30
+}
