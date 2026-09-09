@@ -195,9 +195,11 @@ def assemble_cell_omics(cfg: Any) -> OmicsMatrix:
         path = _resolve_path(cfg, modality, raw_dir)
         if path is None or not path.exists():
             raise FileNotFoundError(
-                f"no file found for omics modality {modality!r} under {raw_dir / 'omics'}. "
-                "Run `python -m hill.data.download --what omics` or set "
-                f"data.omics_files.{modality} in the config."
+                f"no file found for omics modality {modality!r} under {raw_dir / 'omics'}.\n"
+                "  1. fetch it:   python -m hill.data.download --what omics\n"
+                "     if that 404s: python -m hill.data.download --autofix --write\n"
+                f"  2. or point at a file you already have: data.omics_files.{modality}=<path>\n"
+                f"  3. or drop the modality entirely: remove {modality!r} from data.omics_modalities"
             )
         if modality == "expression":
             df = load_expression(path)

@@ -1,55 +1,105 @@
 # Remote locations of every external file the pipeline needs.
 #
-# URLs are kept in config rather than in code so that a GDSC/DepMap release
-# change is a one-line edit.  If a download fails the pipeline reports the
-# failure — it never substitutes another file silently.
+# GDSC keeps each file in the release folder where it was introduced and renames
+# files between releases, so a single hard-coded path rots. Every entry may list
+# several candidate URLs; the downloader tries them in order and the first one
+# that responds wins. `match` is a regex used by --autofix to find the real key
+# in the bucket listing.
 #
-# Verify the current filenames at:
-#   GDSC      https://www.cancerrxgene.org/downloads/bulk_download
-#   Reactome  https://reactome.org/download-data
-#   DepMap    https://depmap.org/portal/download/
+# WHEN A DOWNLOAD 404s:
+#   python -m hill.data.download --probe                  # which candidates resolve?
+#   python -m hill.data.download --autofix                # ask the bucket what exists
+#   python -m hill.data.download --autofix --write        # ...and repair this file
+#   python -m hill.data.download --discover GDSC_release8.2 --pattern raw_data
+# Or download by hand from https://www.cancerrxgene.org/downloads/bulk_download
+# and drop the file into the directory named by `filename` — the pipeline finds
+# files by glob, so the exact release suffix in the name does not matter.
+#
+# `optional: true` means the default config (data.gdsc_versions: [2]) does not
+# need the file, so a failure there does not stop the run.
 
 gdsc_raw:
   GDSC2:
-    url: https://cog.sanger.ac.uk/cancerrxgene/GDSC_release8.5/GDSC2_public_raw_data_25Feb20.csv.zip
+    urls:
+      - https://cog.sanger.ac.uk/cancerrxgene/GDSC_release8.5/GDSC2_public_raw_data_25Feb20.csv.zip
+      - https://cog.sanger.ac.uk/cancerrxgene/GDSC_release8.4/GDSC2_public_raw_data_25Feb20.csv.zip
+      - https://cog.sanger.ac.uk/cancerrxgene/GDSC_release8.2/GDSC2_public_raw_data_25Feb20.csv.zip
+      - https://cog.sanger.ac.uk/cancerrxgene/GDSC_release8.1/GDSC2_public_raw_data_25Feb20.csv.zip
+      - https://cog.sanger.ac.uk/cancerrxgene/GDSC_release8.0/GDSC2_public_raw_data_25Feb20.csv.zip
+    match: GDSC2_public_raw_data.*\.(csv\.zip|zip)$
     filename: GDSC2_public_raw_data.csv.zip
     unzip: true
   GDSC1:
-    url: https://cog.sanger.ac.uk/cancerrxgene/GDSC_release8.5/GDSC1_public_raw_data_25Feb20.csv.zip
+    urls:
+      - https://cog.sanger.ac.uk/cancerrxgene/GDSC_release8.5/GDSC1_public_raw_data_25Feb20.csv.zip
+      - https://cog.sanger.ac.uk/cancerrxgene/GDSC_release8.4/GDSC1_public_raw_data_25Feb20.csv.zip
+      - https://cog.sanger.ac.uk/cancerrxgene/GDSC_release8.2/GDSC1_public_raw_data_25Feb20.csv.zip
+      - https://cog.sanger.ac.uk/cancerrxgene/GDSC_release8.1/GDSC1_public_raw_data_25Feb20.csv.zip
+      - https://cog.sanger.ac.uk/cancerrxgene/GDSC_release8.0/GDSC1_public_raw_data_25Feb20.csv.zip
+    match: GDSC1_public_raw_data.*\.(csv\.zip|zip)$
     filename: GDSC1_public_raw_data.csv.zip
     unzip: true
+    optional: true          # unused while data.gdsc_versions is [2]
 
 gdsc_fitted:
   GDSC2:
-    url: https://cog.sanger.ac.uk/cancerrxgene/GDSC_release8.5/GDSC2_fitted_dose_response_27Oct23.xlsx
+    urls:
+      - https://cog.sanger.ac.uk/cancerrxgene/GDSC_release8.5/GDSC2_fitted_dose_response_27Oct23.xlsx
+      - https://cog.sanger.ac.uk/cancerrxgene/GDSC_release8.4/GDSC2_fitted_dose_response_24Jul22.xlsx
+    match: GDSC2_fitted_dose_response.*\.xlsx$
     filename: GDSC2_fitted_dose_response.xlsx
   GDSC1:
-    url: https://cog.sanger.ac.uk/cancerrxgene/GDSC_release8.5/GDSC1_fitted_dose_response_27Oct23.xlsx
+    urls:
+      - https://cog.sanger.ac.uk/cancerrxgene/GDSC_release8.5/GDSC1_fitted_dose_response_27Oct23.xlsx
+      - https://cog.sanger.ac.uk/cancerrxgene/GDSC_release8.4/GDSC1_fitted_dose_response_24Jul22.xlsx
+    match: GDSC1_fitted_dose_response.*\.xlsx$
     filename: GDSC1_fitted_dose_response.xlsx
+    optional: true          # unused while data.gdsc_versions is [2]
 
 gdsc_annotation:
   cell_lines:
-    url: https://cog.sanger.ac.uk/cancerrxgene/GDSC_release8.5/Cell_Lines_Details.xlsx
+    urls:
+      - https://cog.sanger.ac.uk/cancerrxgene/GDSC_release8.5/Cell_Lines_Details.xlsx
+    match: Cell_Lines_Details.*\.xlsx$
     filename: Cell_Lines_Details.xlsx
   compounds:
-    url: https://cog.sanger.ac.uk/cancerrxgene/GDSC_release8.5/screened_compounds_rel_8.5.csv
+    urls:
+      - https://cog.sanger.ac.uk/cancerrxgene/GDSC_release8.5/screened_compounds_rel_8.5.csv
+      - https://cog.sanger.ac.uk/cancerrxgene/GDSC_release8.4/screened_compounds_rel_8.4.csv
+    match: screened_compounds.*\.csv$
     filename: screened_compounds.csv
 
 omics:
   expression:
-    url: https://www.cancerrxgene.org/gdsc1000/GDSC1000_WebResources//Data/preprocessed/Cell_line_RMA_proc_basalExp.txt.zip
+    # The www.cancerrxgene.org/gdsc1000 path is retired (HTTP 410); the same
+    # file is mirrored in the bucket under GDSC1000/.
+    urls:
+      - https://cog.sanger.ac.uk/cancerrxgene/GDSC1000/GDSC1000_WebResources/Data/preprocessed/Cell_line_RMA_proc_basalExp.txt.zip
+      - https://cog.sanger.ac.uk/cancerrxgene/GDSC_release8.5/Cell_line_RMA_proc_basalExp.txt.zip
+      - https://www.cancerrxgene.org/gdsc1000/GDSC1000_WebResources/Data/preprocessed/Cell_line_RMA_proc_basalExp.txt.zip
+    match: Cell_line_RMA_proc_basalExp.*\.zip$
     filename: Cell_line_RMA_proc_basalExp.txt.zip
     unzip: true
   mutation:
-    url: https://cog.sanger.ac.uk/cancerrxgene/GDSC_release8.5/mutations_all_20230202.zip
+    urls:
+      - https://cog.sanger.ac.uk/cancerrxgene/GDSC_release8.5/mutations_all_20230202.zip
+      - https://cog.sanger.ac.uk/cancerrxgene/GDSC_release8.4/mutations_all_20230202.zip
+      - https://cog.sanger.ac.uk/cancerrxgene/GDSC_release8.2/mutations_all_20220315.zip
+    match: mutations_(all|summary).*\.(zip|csv)$
     filename: mutations_all.zip
     unzip: true
   cnv:
-    url: https://cog.sanger.ac.uk/cancerrxgene/GDSC_release8.5/cnv_gistic_20191101.zip
+    urls:
+      - https://cog.sanger.ac.uk/cancerrxgene/GDSC_release8.5/cnv_gistic_20191101.zip
+      - https://cog.sanger.ac.uk/cancerrxgene/GDSC_release8.4/cnv_gistic_20191101.zip
+      - https://cog.sanger.ac.uk/cancerrxgene/GDSC_release8.2/cnv_gistic_20191101.zip
+      - https://cog.sanger.ac.uk/cancerrxgene/GDSC_release8.0/cnv_gistic_20191101.zip
+    match: cnv_(gistic|abs_copy_number).*\.(zip|csv)$
     filename: cnv_gistic.zip
     unzip: true
 
 pathways:
   reactome:
-    url: https://reactome.org/download/current/ReactomePathways.gmt
+    urls:
+      - https://reactome.org/download/current/ReactomePathways.gmt
     filename: ReactomePathways.gmt

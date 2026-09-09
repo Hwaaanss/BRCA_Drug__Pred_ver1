@@ -148,6 +148,22 @@ def _download_bundle(file_ids: list[str], dest_dir: Path, batch: int = 100) -> N
         log.info("  files %d / %d", min(i + batch, len(file_ids)), len(file_ids))
 
 
+def _dir_size_gb(path: Path) -> float:
+    if not path.exists():
+        return 0.0
+    return sum(f.stat().st_size for f in path.rglob("*") if f.is_file()) / 1024**3
+
+
+def _report_reclaimable(files_dir: Path, matrix_path: Path) -> None:
+    """The per-file downloads are redundant once the matrix exists (30 GB budget)."""
+    size = _dir_size_gb(files_dir)
+    if size > 0.5:
+        log.info(
+            "%s now holds everything from %s (%.1f GB). Reclaim it with: rm -rf %s",
+            matrix_path.name, files_dir.name, size, files_dir,
+        )
+
+
 def download_expression(project: str, out_dir: Path) -> Path:
     """STAR-Counts gene expression; assembled into a patients x genes TPM matrix."""
     filters = {
@@ -195,6 +211,7 @@ def download_expression(project: str, out_dir: Path) -> Path:
     out_path = out_dir / "expression_tpm.parquet"
     matrix.to_parquet(out_path)
     log.info("expression matrix: %s -> %s", matrix.shape, out_path.name)
+    _report_reclaimable(files_dir, out_path)
     return out_path
 
 
@@ -230,6 +247,7 @@ def download_mutations(project: str, out_dir: Path) -> Path:
     out_path = out_dir / "mutations_binary.parquet"
     matrix.to_parquet(out_path)
     log.info("mutation matrix: %s -> %s", matrix.shape, out_path.name)
+    _report_reclaimable(files_dir, out_path)
     return out_path
 
 

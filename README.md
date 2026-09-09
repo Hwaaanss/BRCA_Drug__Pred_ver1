@@ -141,9 +141,25 @@ python -m hill.data.download --what all  # GDSC raw + fitted + omics + Reactome 
 python -m hill.data.download_tcga --project TCGA-BRCA --what clinical expression mutation
 ```
 
-`configs/data_sources.yaml` holds every URL. GDSC filenames change between
-releases: if a download fails, the error names the file and the URL to fix — the
-pipeline never substitutes a different file silently.
+`configs/data_sources.yaml` holds every URL. GDSC moves files between release
+folders and renames them, so each entry lists several candidate URLs and the
+first one that responds wins. Downloads retry with an HTTP `Range` resume, so a
+transfer cut off mid-file (GDSC does this on the large ones) picks up where it
+stopped. If an entry still fails:
+
+```bash
+python -m hill.data.download --probe                        # which candidates resolve?
+python -m hill.data.download --autofix                      # ask the bucket what exists
+python -m hill.data.download --autofix --write              # ...and repair the manifest
+python -m hill.data.download --discover GDSC_release8.2 --pattern raw_data
+```
+
+`GDSC1` entries are marked `optional`: the default config uses GDSC2 only, so
+their failure does not stop the run. Files may also be downloaded by hand from
+<https://www.cancerrxgene.org/downloads/bulk_download> and dropped into
+`data/raw/<group>/` — the pipeline locates them by glob, so the release suffix in
+the filename does not matter. The pipeline never substitutes a different file
+silently.
 
 Whole-slide images are **not** downloaded (≈ 600 GB, far beyond the 30 GB budget).
 The pipeline consumes pre-extracted UNI patch features from
@@ -219,7 +235,10 @@ Set `ablation.full_cv=true` for the complete seed × fold grid (5× longer), or 
 | symptom | fix |
 |---|---|
 | `torch.cuda.is_available()` is False | the pip wheel's CUDA build does not match the driver — reinstall torch from the matching `--index-url` (cu121 for driver < 550) |
-| `no raw viability file for GDSC2` | the release filename changed; update `configs/data_sources.yaml` or drop the CSV into `data/raw/gdsc_raw/` |
+| `no raw viability file for GDSC2` | the release filename changed; run `python -m hill.data.download --autofix --write`, or drop the CSV into `data/raw/gdsc_raw/` |
+| download fails with 404 / 410 | the file moved release folders — `--probe` then `--autofix --write` |
+| download dies with `IncompleteRead` | already handled: it retries with a `Range` resume. If it still fails, rerun the command — the `.part` file is kept and resumed |
+| `no file found for omics modality 'cnv'` | fetch it, point `data.omics_files.cnv` at a local copy, or drop `cnv` from `data.omics_modalities` |
 | `no cell line is present in every modality` | identifier harmonisation failed; check that `Cell_Lines_Details.xlsx` is present so names map to COSMIC ids |
 | `no gene set matched the feature universe` | the GMT uses a different symbol namespace than the omics matrix |
 | RDKit missing → hashed n-gram fingerprints | install `rdkit` from conda-forge; LDO results are weaker without it |
