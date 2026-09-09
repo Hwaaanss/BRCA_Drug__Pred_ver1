@@ -1,0 +1,137 @@
+# HILL — production configuration.
+#
+# Sized for the target node: 1x A100-80GB (GPU 0 only), 100 GB RAM,
+# 10 CPU cores, 30 GB disk.  Every value here is a deliberate choice; nothing
+# in the code hard-codes a hyperparameter.
+
+name: hill_base
+seed: 42
+device: cuda
+
+paths:
+  data_root: data
+  raw_dir: data/raw
+  processed_dir: data/processed
+  splits_dir: data/splits
+  results_dir: results
+  reports_dir: reports
+  figures_dir: reports/figures
+  checkpoint_dir: results/checkpoints
+  log_dir: results/logs
+
+data:
+  # GDSC2 is the current screen; add 1 to use GDSC1 as well (another ~1.5 GB
+  # of raw wells — check the disk budget first).
+  gdsc_versions: [2]
+  neg_control_tags: ["NC-1", "NC-0"]
+  pos_control_tags: ["B"]
+  trim_viability: true
+  min_points_per_pair: 4
+  max_points_per_pair: 16
+  aggregate_replicates: true
+
+  omics_modalities: ["expression", "mutation", "cnv"]
+  expression_log1p: true
+  max_genes: 12000
+
+  pathway_gmt: data/raw/pathways/ReactomePathways.gmt
+  min_genes_per_group: 10
+  max_genes_per_group: 128
+  target_n_tokens: 400
+  n_latent_tokens: 32
+
+  drug_features: fingerprint
+  fingerprint_bits: 1024
+  fingerprint_radius: 2
+
+  histology_dir: data/processed/uni_features
+  max_patches: 2048
+  histo_feature_dim: 1024
+
+  tcga_dir: data/raw/tcga
+  clinical_cmax_csv: data/clinical_cmax.csv
+  require_verified_cmax: false
+
+splits:
+  n_folds: 5
+  seed: 42
+  val_fraction: 0.15
+  schemes: ["LCO", "LPO", "LDO"]
+  primary: LCO
+
+model:
+  head: curve
+  d_model: 256
+  n_layers: 4
+  n_heads: 8
+  ffn_mult: 4
+  dropout: 0.1
+  attn_dropout: 0.1
+  head_dropout: 0.1
+  drug_hidden: 256
+  histology:
+    enabled: false          # Stage 0 (GDSC): cell lines have no slides
+    feature_dim: 1024
+    n_prototypes: 16
+    gate_hidden: 128
+    gate_efficacy: true
+    gate_potency: true
+    train_gamma: false
+
+loss:
+  kind: gaussian
+  heteroscedastic: true
+  sigma_from_drug_features: true
+  clinical_weight: 1.0
+  source_weight_stage1: 0.5
+  scalar_loss: mse
+
+train:
+  # 256 pairs x ~7 points x 401 tokens fits comfortably in 80 GB with bf16;
+  # raise eval_batch_size before batch_size if you have headroom.
+  batch_size: 256
+  eval_batch_size: 512
+  epochs: 60
+  lr: 0.0003
+  weight_decay: 0.01
+  warmup_ratio: 0.05
+  grad_clip: 1.0
+  patience: 10
+  min_epochs: 5
+  amp_dtype: bf16
+  num_workers: 8            # 10 cores: 8 loaders + main + CUDA feeder
+  prefetch_factor: 4
+  persistent_workers: true
+  pin_memory: true
+  stage1_epochs: 30
+  stage1_lr: 0.0001
+
+eval:
+  min_pairs_per_drug: 5
+  reference: published
+  bootstrap_n: 1000
+
+hpo:
+  n_trials: 10
+  epochs: 25
+  patience: 6
+  fold: 0
+  storage: results/hpo/optuna.db
+  study_name: hill_lco
+  metric: delta_pcc_vs_naive
+  seed: 42
+
+ablation:
+  seeds: 10
+  fold_cycling: true        # seed s evaluates fold (s % n_folds): 10 runs cover all 5 folds twice
+  full_cv: false            # true = every seed runs every fold (5x the compute)
+  steps: [0, 1, 2, 3, 4, 5]
+  enforce_stop_rule: true
+  baselines: ["naive", "elasticnet", "randomforest", "moli", "superfelt"]
+
+resources:
+  gpu_index: 0
+  max_gpu_memory_fraction: 0.92
+  torch_threads: 10
+  max_ram_gb: 100.0
+  max_disk_gb: 30.0

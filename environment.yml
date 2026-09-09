@@ -1,0 +1,37 @@
+# Conda environment for the HILL pipeline.
+#
+#   conda env create -f environment.yml
+#   conda activate hill
+#
+# GPU note: the pip section installs the CUDA 12.4 build of PyTorch, which
+# supports the A100 (sm_80).  If your driver is older than 550, switch the
+# index URL to .../whl/cu121 and pin torch==2.4.1.
+name: hill
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip>=24.0
+  # RDKit is far easier to get from conda-forge than from pip on older glibc.
+  - rdkit>=2023.09
+  # Only needed to (re)extract UNI features from whole-slide images offline.
+  - openslide>=4.0
+  - pip:
+      - --extra-index-url https://download.pytorch.org/whl/cu124
+      - torch==2.5.1
+      - numpy>=1.26,<3
+      - pandas>=2.1
+      - pyarrow>=14.0
+      - scipy>=1.11
+      - scikit-learn>=1.3
+      - matplotlib>=3.8
+      - optuna>=3.5
+      - PyYAML>=6.0
+      - requests>=2.31
+      - openpyxl>=3.1
+      - pytest>=8.0
+      # Optional, only for re-extracting UNI patch features from WSIs:
+      # - timm>=1.0
+      # - huggingface-hub>=0.24
+      # - openslide-python>=1.3
+      # - Pillow>=10.0

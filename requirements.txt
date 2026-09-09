@@ -1,20 +1,27 @@
-torch>=2.0.0
-torchvision>=0.15.0
-numpy>=1.24.0
-pandas>=2.0.0
-scikit-learn>=1.3.0
-scipy>=1.11.0
-matplotlib>=3.7.0
-seaborn>=0.12.0
-lifelines>=0.27.0
-python-docx>=0.8.11
-tqdm>=4.65.0
-requests>=2.31.0
-urllib3>=2.0.0
-openpyxl>=3.1.0
-statsmodels>=0.14.0
-umap-learn>=0.5.5
-Pillow>=10.0.0
-openslide-python>=1.3.0
-timm>=0.9.0
-huggingface-hub>=0.20.0
+# HILL runtime dependencies.
+#
+# PyTorch must match your CUDA driver.  For the A100 target node install it
+# FIRST from the PyTorch index, then install this file:
+#
+#   pip install torch==2.5.1 --index-url https://download.pytorch.org/whl/cu124
+#   pip install -r requirements.txt
+#
+# (torch is listed here too so a CPU-only install still works, but pip will keep
+#  whatever torch you already installed.)
+
+torch>=2.4,<3            # 2.4+ for torch.amp.GradScaler("cuda", ...) and bf16 autocast
+numpy>=1.26,<3
+pandas>=2.1
+pyarrow>=14.0            # parquet I/O for the point/pair tables
+scipy>=1.11
+scikit-learn>=1.3
+matplotlib>=3.8
+optuna>=3.5              # hyper-parameter search + sqlite study storage
+PyYAML>=6.0
+requests>=2.31
+openpyxl>=3.1            # GDSC fitted dose-response .xlsx files
+rdkit>=2023.9            # Morgan fingerprints; without it drug features fall back
+                         # to hashed n-grams (logged loudly, weaker LDO results)
+
+# --- development / verification ---
+pytest>=8.0

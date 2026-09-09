@@ -1,5 +1,0 @@
-drug,moa_class,moa_desc,PathOmicDRP_AUC,PCA256_AUC,advantage,winner,n,n_pos,n_neg
-Docetaxel,Microtubule,Taxane (stabilizer),0.357,0.744,-0.387,PCA-256,25,22,3
-Paclitaxel,Microtubule,Taxane (stabilizer),0.287,0.769,-0.481,PCA-256,28,25,3
-Cyclophosphamide,DNA-damaging,Alkylating agent,0.926,0.352,0.574,PathOmicDRP,57,54,3
-Doxorubicin,DNA-damaging,Anthracycline / topo-II inhibitor,0.806,0.243,0.562,PathOmicDRP,38,34,4

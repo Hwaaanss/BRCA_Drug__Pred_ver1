@@ -1,0 +1,91 @@
+# Tiny end-to-end configuration for `python -m hill.smoke`.
+# Runs on CPU in a couple of minutes against SYNTHETIC data.
+name: hill_smoke_SYNTHETIC
+seed: 0
+device: cpu
+
+paths:
+  data_root: data_smoke
+  raw_dir: data_smoke/raw
+  processed_dir: data_smoke/processed
+  splits_dir: data_smoke/splits
+  results_dir: results_smoke
+  reports_dir: reports_smoke
+  figures_dir: reports_smoke/figures
+  checkpoint_dir: results_smoke/checkpoints
+  log_dir: results_smoke/logs
+
+data:
+  gdsc_versions: [2]
+  min_points_per_pair: 4
+  max_points_per_pair: 8
+  omics_modalities: ["expression", "mutation"]
+  max_genes: 2000
+  pathway_gmt: data_smoke/raw/pathways/ReactomePathways_SYNTHETIC.gmt
+  min_genes_per_group: 5
+  max_genes_per_group: 32
+  target_n_tokens: 48
+  n_latent_tokens: 8
+  drug_features: onehot
+  histology_dir: data_smoke/processed/uni_features
+  max_patches: 24
+  histo_feature_dim: 64
+  tcga_dir: data_smoke/raw/tcga
+  clinical_cmax_csv: data_smoke/clinical_cmax_SYNTHETIC.csv
+
+splits:
+  n_folds: 3
+  seed: 0
+  val_fraction: 0.2
+  schemes: ["LCO", "LPO", "LDO"]
+  primary: LCO
+
+model:
+  head: curve
+  d_model: 32
+  n_layers: 2
+  n_heads: 4
+  ffn_mult: 2
+  dropout: 0.1
+  histology:
+    enabled: false
+    feature_dim: 64
+    n_prototypes: 4
+    gate_hidden: 16
+
+train:
+  batch_size: 32
+  eval_batch_size: 64
+  epochs: 3
+  lr: 0.001
+  patience: 3
+  min_epochs: 1
+  amp_dtype: none
+  num_workers: 0
+  persistent_workers: false
+  pin_memory: false
+  stage1_epochs: 2
+
+eval:
+  min_pairs_per_drug: 2
+  bootstrap_n: 50
+
+hpo:
+  n_trials: 2
+  epochs: 2
+  patience: 2
+  fold: 0
+  storage: results_smoke/hpo/optuna.db
+  study_name: smoke_SYNTHETIC
+
+ablation:
+  seeds: 2
+  fold_cycling: true
+  steps: [0, 1, 2]
+  enforce_stop_rule: false
+  baselines: ["naive", "elasticnet"]
+
+resources:
+  torch_threads: 4
+  max_ram_gb: 8.0
+  max_disk_gb: 5.0
