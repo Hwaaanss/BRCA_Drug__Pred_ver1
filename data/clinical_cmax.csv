@@ -1,0 +1,33 @@
+# Clinical peak plasma concentration (Cmax) per drug, in micromolar.
+#
+# Used only by the Stage-1 clinical likelihood (guide S6.2):
+#     p(responder | i, j) = sigmoid( w * (1 - r_ij(Cmax_j)) + b )
+#
+# HOW TO USE THIS FILE
+#   * cmax_um empty  -> the drug is EXCLUDED from the clinical loss and listed
+#     in the Gate-0 G-5 report.  That is the correct state for a compound with
+#     no human pharmacokinetic data (e.g. tool compounds such as ABT-737).
+#   * verified=false -> the number is an order-of-magnitude literature look-up
+#     that NO HUMAN HAS CHECKED against the cited source.  Check it, then set
+#     verified=true.  Run training with data.require_verified_cmax=true to use
+#     only checked values.
+#   * drug_id refers to the GDSC DRUG_ID in screened_compounds.csv of the
+#     release you downloaded; confirm the ids before a production run.
+#
+# Primary reference for clinically relevant concentrations:
+#   Liston DR, Davis M. Clinically Relevant Concentrations of Anticancer Drugs:
+#   A Guide for Nonclinical Studies. Clin Cancer Res. 2017;23(14):3489-3498.
+drug_id,drug_name,cmax_um,source,verified,notes
+1005,Cisplatin,5.0,Liston & Davis 2017 (free platinum peak),false,free (ultrafilterable) platinum after standard dosing
+1007,Docetaxel,3.7,Liston & Davis 2017,false,100 mg/m2 1-h infusion
+1080,Paclitaxel,5.0,Liston & Davis 2017,false,175 mg/m2 3-h infusion
+1190,Gemcitabine,60.0,Liston & Davis 2017,false,1000 mg/m2 30-min infusion; very short half-life
+1199,Tamoxifen,0.4,Liston & Davis 2017,false,steady-state trough/peak on 20 mg daily
+1558,Lapatinib,4.2,Liston & Davis 2017,false,1250 mg daily steady state
+1004,Vinblastine,0.4,Liston & Davis 2017,false,transient peak; rapid tissue distribution
+1909,Venetoclax,2.5,Liston & Davis 2017,false,400 mg daily steady state
+1816,Fulvestrant,0.04,Liston & Davis 2017,false,500 mg IM monthly steady state
+1594,OSI-027,,,false,phase I only; no reliable Cmax collected
+1248,Daporinad,,,false,NAMPT inhibitor (FK866); phase I only
+1910,ABT737,,,false,tool compound; never dosed in humans
+1720,AZD5991,,,false,early-phase; no public Cmax

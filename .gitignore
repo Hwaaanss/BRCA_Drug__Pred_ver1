@@ -1,41 +1,50 @@
-# Data (too large for git)
-data/
-*.csv
-*.tsv
+# --- data: everything except the hand-curated tables that ship with the repo ---
+data/*
+!data/clinical_cmax.csv
+data_smoke/
+
+# --- generated results ---
+results/
+results_smoke/
+reports/figures/
+reports/*.html
+reports_smoke/
 *.pt
 *.pth
+*.ckpt
+*.db
+*.parquet
+*.npz
+
+# reports/gate0.md and reports/findings.md are deliverables: keep them tracked.
+
+# --- large source data formats ---
 *.svs
 *.tiff
 *.tif
+*.maf
+*.maf.gz
 
-# Results
-results/
-logs/
-
-# Python
+# --- python ---
 __pycache__/
-*.pyc
-*.pyo
+*.py[cod]
 *.egg-info/
+.eggs/
 dist/
 build/
-.eggs/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
 
-# Environment
+# --- environments ---
 .env
-*.env
 .venv/
 venv/
 
-# IDE
+# --- editors / OS ---
 .vscode/
 .idea/
 *.swp
-*.swo
-
-# OS
 .DS_Store
 Thumbs.db
-
-# Jupyter
 .ipynb_checkpoints/

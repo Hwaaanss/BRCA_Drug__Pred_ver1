@@ -1,205 +1,238 @@
-# PathOmicDRP
+# HILL — predicting dose–response *functions*, not IC50 numbers
 
-**PathOmicDRP: Integrating Multi-Omics and Histopathology through Cross-Attention Networks for Cancer Drug Response Prediction**
-
-## Overview
-
-PathOmicDRP is a multi-modal deep learning framework that integrates four biological data modalities — genomic mutations, transcriptomic gene expression, proteomic protein abundance, and histopathology whole-slide images — through cross-attention fusion to predict cancer drug response.
-
-### Key Findings
-
-- **Performance Dissociation**: Linear baselines (ElasticNet) achieve near-perfect accuracy on imputed IC50 targets (PCC = 0.925) but fail on real clinical treatment outcomes (AUC = 0.461). PathOmicDRP shows the opposite: modest imputed IC50 accuracy (PCC = 0.455) but strong clinical prediction (AUC = 0.831).
-- **Representation Learning**: PathOmicDRP embeddings contain substantially more clinical information than the imputed IC50 training targets (AUC 0.735 vs. 0.423).
-- **Cross-Attention Robustness**: Cross-attention fusion retains 55.6% performance with 3/4 modalities missing, vs. 43.0% for self-attention (+12.6 pp).
-- **External Validation**: Drug sensitivity patterns align with GDSC cell line pharmacological data (Spearman rho = 0.670, p = 0.012).
-
-## Architecture
+HILL predicts a **dose–response curve** for every (sample, drug) pair and trains
+on **raw, control-normalised viability measurements**. IC50, AUC and Emax are
+*derived* from the predicted curve rather than regressed onto.
 
 ```
-Input Modalities
-├── Genomic (193 mutation features) → Genomic Encoder → 8 tokens
-├── Transcriptomic (2,000 genes) → Pathway Tokenizer → 2,000 tokens
-├── Proteomic (464 RPPA proteins) → Proteomic Encoder → 16 tokens
-└── Histopathology (H&E WSI) → UNI + ABMIL → 16 tokens
-
-Cross-Attention Fusion (2 layers, 8 heads, bidirectional)
-    Omics tokens <--> Histology tokens
-
-Attention Pooling → 256-dim global representation
-Prediction Head → IC50 for 13 drugs
+r_ij(c) = E_inf + (1 − E_inf) · sigmoid( −s · (log c − m) )
+              ▲                  ▲              ▲
+        efficacy ceiling     Hill slope     potency (log midpoint)
 ```
 
-## Project Structure
+## Why
+
+GDSC's official curve-fitting pipeline (`gdscIC50::logist3`) fits a **two**-parameter
+logistic with the floor **pinned at 0** — it assumes every drug kills 100 % of cells
+at a high enough dose. Three consequences follow, and they are all the same problem:
+
+1. **Efficacy variation cannot be expressed.** The published fit has no Emax
+   parameter, so it cannot be read out of the released files at all.
+2. **That is where extrapolated IC50s come from.** When the true floor is high, a
+   floor-at-zero fit pushes the midpoint past the highest tested dose. The
+   censoring problem and the misspecification problem are one problem.
+3. **Potency and efficacy are conflated.** A drug that kills 95 % at 1 µM and one
+   that kills 55 % at 1 µM get the same label.
+
+Every deep DRP model — DeepCDR, MOLI, SuperFELT, DRPreter, TransCDR, GBD-DRP —
+regresses onto labels produced by that fit, so the field inherits the
+misspecification. Training on the raw measurements instead:
+
+* raises the supervision from 1 number to K ≈ 5–9 measurements per pair;
+* **dissolves the censoring problem** — nothing is regressed onto a censored
+  quantity, so no Tobit likelihood is needed, and a curve that never crosses 50 %
+  is still fully identified by its observed points;
+* predicts potency (`m`) and efficacy (`E_inf`) as separate quantities;
+* makes monotonicity in dose a **structural** property of the parameterisation,
+  not something the optimiser has to discover.
+
+**The encoder is not the contribution.** Pathway tokenisation (SurvPath,
+Pathformer, DRPreter) and drug-conditioned pathway attention (DRPreter) are reused
+and cited. The contribution is the output head and the likelihood.
+
+## Repository layout
 
 ```
-PathOmicDRP/
-├── src/
-│   ├── model.py                    # PathOmicDRP architecture
-│   ├── dataset.py                  # Data loading and preprocessing
-│   ├── train.py                    # Phase 1: 3-modal baseline training
-│   ├── train_phase2.py             # Phase 2: Ablation studies
-│   ├── train_phase3_4modal.py      # Phase 3: 4-modal training with histology
-│   ├── interpretability.py         # Modality ablation, gradient attribution, ABMIL attention
-│   ├── advanced_analysis.py        # Subtype analysis, drug clustering, survival
-│   ├── high_impact_analyses.py     # Clinical outcome, LODO, biomarker concordance
-│   ├── architecture_comparison.py  # Cross-attn vs self-attn vs MLP fusion
-│   ├── priority_analyses.py        # Statistical tests, GDSC validation, SOTA benchmarking
-│   ├── strengthening_analyses.py   # Fair comparison, survival, phenotype analysis
-│   ├── strengthening_abc.py        # Modality dropout robustness, representation quality
-│   └── w1w2w3_resolution.py        # Clinical AUC comparison, expanded validation
-├── scripts/
-│   ├── 01_download_clinical.py     # Download TCGA-BRCA clinical data
-│   ├── 02_download_mutations.py    # Download somatic mutation data (MAF)
-│   ├── 04_download_transcriptomic.py  # Download RNA-seq expression
-│   ├── 05_download_proteomic.py    # Download RPPA proteomic data
-│   ├── 06c_download_wsi_parallel.py   # Download H&E whole-slide images
-│   ├── 07_download_gdsc.py        # Download GDSC drug sensitivity data
-│   ├── 07_extract_uni_features.py  # Extract UNI foundation model features from WSIs
-│   ├── 10_extract_genomic_features.py    # Process genomic features
-│   ├── 11_extract_transcriptomic_features.py  # Process transcriptomic features
-│   ├── 12_extract_proteomic_features.py  # Process proteomic features
-│   ├── 13_extract_gdsc_brca.py     # Extract BRCA-specific GDSC data
-│   └── 14_harmonize_samples.py     # Harmonize multi-modal sample IDs
-├── configs/
-│   └── default_config.json         # Default model hyperparameters
-├── requirements.txt
-└── README.md
+hill/
+  config.py           typed, strict configuration (no hyper-parameter is hard-coded)
+  derive.py         ★ curve -> IC50 / AUC / Emax  (IC50 returns None when it does not exist)
+  losses.py         ★ viability likelihood (Gaussian / Beta) + clinical likelihood at Cmax
+  train.py            Stage 0 training loop, early stopping on the validation primary metric
+  stage1.py           TCGA fine-tuning, histology gates, likelihood-ratio tests
+  evaluate.py         per-drug metrics; drug-pooled correlation is refused by design
+  hpo.py              Optuna search (10 trials), search space declared in one place
+  ablation.py         the §7.4 ladder + baselines over 10 seeds
+  report.py           writes reports/findings.md, negative results included
+  run_all.py          the whole study in one command
+  smoke.py            end-to-end run on SYNTHETIC data, then deletes it
+  data/               GDSC raw wells, omics, drug features, tokenisation, splits, TCGA
+  models/             curve_head ★, encoder, drug, histology gates, baselines
+  audit/              Gate 0: G-1 … G-5 and the batched curve fitter
+  figures/            every manuscript figure (PDF + PNG, 400 dpi, colourblind-safe)
+configs/              base.yaml (production) · smoke.yaml (tiny) · data_sources.yaml (URLs)
+tests/                70 tests, including test_gamma_zero_equivalence
 ```
 
-## Installation
+## Gate 0 — the audit that runs before any model
+
+`reports/gate0.md` is produced by `python -m hill.audit.run_gate0` and answers:
+
+| gate | question | halts the project? |
+|---|---|---|
+| G-1 | Can we read raw viability and does our normalisation reproduce the published fits? | **yes** if it fails |
+| G-2 | What fraction of published IC50s is censored? | no, reported either way |
+| G-3 | Does a free-floor model beat the official two-parameter fit? | **yes** if not supported |
+| G-4 | How much label variance is the drug main effect? | no, it justifies the metric choice |
+| G-5 | What is actually available on the TCGA side? | no |
+
+G-3 is the decisive experiment and uses no deep learning at all: both models are
+fitted to the same points, then compared on residuals, AIC/BIC, the distribution
+of the fitted `E_inf`, and the overlap between high-`E_inf` and censored pairs.
+
+## Metrics
+
+| metric | where | note |
+|---|---|---|
+| viability RMSE | per measurement | curve quality |
+| per-drug PCC of derived IC50 | per drug, then averaged | comparison with prior work |
+| **ΔPCC vs `NaiveMeanEffects`** | per drug | **primary metric** (DrEval-style normalisation) |
+| Emax correlation | per drug | only this formulation can produce it |
+| clinical ROC-AUC | TCGA, evaluated at Cmax | target domain |
+| γ_E, γ_m + LRT | — | does morphology act on efficacy but not potency? |
+
+**Drug-pooled ("global") PCC is not computed.** With a large drug main effect it
+mostly measures which drug a row belongs to; `hill/evaluate.py` raises
+`GlobalPCCForbiddenError` if it is requested.
+
+Pairs whose predicted curve never reaches 50 % have **no IC50**. That is a result,
+not a missing value: `derive.ln_ic50` returns NaN/None, and every metric is
+reported both excluding and including those pairs, with the excluded fraction.
+
+## Ablation ladder (one change at a time)
+
+| step | configuration | question | stop rule |
+|---|---|---|---|
+| 0 | `ScalarHILL` (same encoder, MSE on ln IC50) | is the encoder sound? | **must beat MOLI or the ladder halts** |
+| 1 | HILL curve head, single σ | what does the curve head add? | |
+| 2 | + heteroscedastic σ_j | what does the likelihood's shape add? | |
+| 3 | + TCGA transfer, γ = 0 | domain transfer | |
+| 4 | + γ_E released | LRT on efficacy | |
+| 5 | + γ_m released | does morphology touch potency too? | |
+
+`ScalarHILL` shares the encoder, the data and the splits with HILL exactly, so the
+HILL − ScalarHILL gap isolates the head and the loss. That comparison *is* the paper.
+
+---
+
+# Running it
+
+## 1. Get the code
 
 ```bash
-# Clone repository
-git clone https://github.com/Soonlab/BRCA_Drug_Pred.git
-cd BRCA_Drug_Pred
-
-# Create conda environment
-conda create -n pathomic python=3.10 -y
-conda activate pathomic
-
-# Install dependencies
-pip install -r requirements.txt
+git clone https://github.com/Hwaaanss/PathOmicDPR_ver1.git
+cd PathOmicDPR_ver1
+git checkout claude/research-code-restructure-x9tkfp
+# already cloned?  ->  git pull origin claude/research-code-restructure-x9tkfp
 ```
 
-## Data Preparation
-
-### 1. Download TCGA-BRCA Data
-```bash
-# Clinical data, mutations, expression, proteomics
-python scripts/01_download_clinical.py
-python scripts/02_download_mutations.py
-python scripts/04_download_transcriptomic.py
-python scripts/05_download_proteomic.py
-
-# Whole-slide images (requires ~612GB storage)
-python scripts/06c_download_wsi_parallel.py
-
-# GDSC drug sensitivity data
-python scripts/07_download_gdsc.py
-```
-
-### 2. Feature Extraction
-```bash
-# Extract and process features
-python scripts/10_extract_genomic_features.py
-python scripts/11_extract_transcriptomic_features.py
-python scripts/12_extract_proteomic_features.py
-python scripts/13_extract_gdsc_brca.py
-python scripts/14_harmonize_samples.py
-
-# Extract UNI histopathology features
-python scripts/07_extract_uni_features.py
-```
-
-## Training
-
-### Phase 1: 3-Modal Baseline
-```bash
-python src/train.py
-```
-
-### Phase 2: Modality Ablation
-```bash
-python src/train_phase2.py
-```
-
-### Phase 3: 4-Modal with Histopathology
-```bash
-python src/train_phase3_4modal.py
-```
-
-## Analysis
+## 2. Create the environment
 
 ```bash
-# Interpretability (ablation, gradient attribution, attention)
-python src/interpretability.py
-
-# Clinical outcome prediction, LODO, biomarker concordance
-python src/high_impact_analyses.py
-
-# Architecture comparison (cross-attn vs self-attn vs MLP)
-python src/architecture_comparison.py
-
-# SOTA benchmarking, statistical tests, GDSC validation
-python src/priority_analyses.py
-
-# Modality dropout robustness, representation quality analysis
-python src/strengthening_abc.py
+conda env create -f environment.yml
+conda activate hill
+python -c "import torch; print(torch.__version__, torch.cuda.is_available(), torch.cuda.get_device_name(0))"
 ```
 
-## Requirements
+## 3. Install libraries and download the data
 
-- Python 3.10+
-- PyTorch 2.11+ (CUDA 12.8 for RTX 5090, or CUDA 12.6+ for other GPUs)
-- 32GB+ GPU memory recommended
-- ~700GB storage for WSI data
+```bash
+pip install -r requirements.txt          # no-op if environment.yml already ran
+python -m hill.data.download --what all  # GDSC raw + fitted + omics + Reactome + annotation
+python -m hill.data.download_tcga --project TCGA-BRCA --what clinical expression mutation
+```
 
-## Data Availability
+`configs/data_sources.yaml` holds every URL. GDSC filenames change between
+releases: if a download fails, the error names the file and the URL to fix — the
+pipeline never substitutes a different file silently.
 
-- **TCGA-BRCA**: Available from [GDC Data Portal](https://portal.gdc.cancer.gov/)
-- **GDSC**: Available from [Genomics of Drug Sensitivity in Cancer](https://www.cancerrxgene.org/)
-- **UNI Foundation Model**: Available from [Mahmood Lab](https://github.com/mahmoodlab/UNI)
+Whole-slide images are **not** downloaded (≈ 600 GB, far beyond the 30 GB budget).
+The pipeline consumes pre-extracted UNI patch features from
+`data/processed/uni_features/<patient_id>.npy` (~4 MB per slide). Patients without
+one are handled by the `no_histology` embedding and contribute through γ = 0.
+
+## 4. Smoke test (a few minutes, deletes its own output)
+
+```bash
+python -m hill.smoke --with-tests
+```
+
+Runs the unit tests, then the whole pipeline — ingest → Gate 0 → HPO → ablation →
+Stage 1 → figures → report — on tiny **SYNTHETIC** data, then removes everything
+it created. Add `--keep` to inspect the artefacts.
+
+## 5. The full study, one command
+
+```bash
+CUDA_VISIBLE_DEVICES=0 python -m hill.run_all --config configs/base.yaml --skip-download
+```
+
+Stages: prepare → Gate 0 → tests → HPO (10 trials) → ablation ladder (10 seeds,
+best hyper-parameters) → Stage 1 + LRT → figures → `reports/findings.md`.
+Gate 0 halts the run if G-1 fails or G-3 does not support the premise — that is
+deliberate.
+
+Outputs:
+
+```
+reports/gate0.md          the data audit, with a reproduction command per number
+reports/findings.md       what worked and what did not, negative results included
+reports/figures/*.pdf     Fig1 … Fig10 + supplementary, 400 dpi, PDF and PNG
+results/ablation.csv      every run; ablation_summary.csv has mean ± sd over seeds
+results/hpo/trials.csv    every trial, its sampled values and its score
+results/checkpoints/      model weights + the config and scaler that produced them
+results/logs/*.jsonl      structured per-epoch logs
+```
+
+## Resource budget (1× A100-80GB, 100 GB RAM, 10 cores, 30 GB disk)
+
+`configs/base.yaml` is sized for exactly that node and `hill/utils/resources.py`
+enforces it: the process is pinned to GPU 0, thread counts are capped at 10, the
+CUDA allocator is capped at 92 % of the card, and a run refuses to start with less
+than 2 GB of free disk.
+
+| knob | value | why |
+|---|---|---|
+| `train.batch_size` | 256 pairs | 256 × ~7 points × ~400 tokens fits in 80 GB with bf16 |
+| `train.amp_dtype` | `bf16` | A100 native; no loss scaling needed |
+| `train.num_workers` | 8 | 8 loaders + main + CUDA feeder ≈ 10 cores |
+| `data.max_patches` | 2048 | caps slide memory at ~4 MB per patient |
+| `ablation.fold_cycling` | `true` | seed *s* runs fold *s* mod 5: 10 seeds cover all 5 folds twice at 1/5 the cost |
+
+Rough wall-clock for the full run: **~20 h** (HPO ≈ 2 h, ladder ≈ 15–18 h).
+Set `ablation.full_cv=true` for the complete seed × fold grid (5× longer), or lower
+`--seeds` / `--n-trials` to trade precision for time.
+
+## Honest-reporting rules baked into the code
+
+* **Synthetic data is unmistakable.** `hill.data.synthetic` drops a `SYNTHETIC`
+  marker; reports get a banner, figures get a watermark, filenames get a suffix.
+* **A failure is reported as a failure.** Downloads, gates and the stop rule return
+  non-zero and say what went wrong; nothing is silently substituted.
+* **Every number has a reproduction command** printed next to it in the reports.
+* **Cmax values ship unverified.** `data/clinical_cmax.csv` carries a
+  `verified` flag that is `false` for every literature look-up. Check each against
+  its cited source and flip the flag; run with `data.require_verified_cmax=true`
+  to use only checked values. Drugs with no Cmax are excluded and listed.
+
+## Troubleshooting
+
+| symptom | fix |
+|---|---|
+| `torch.cuda.is_available()` is False | the pip wheel's CUDA build does not match the driver — reinstall torch from the matching `--index-url` (cu121 for driver < 550) |
+| `no raw viability file for GDSC2` | the release filename changed; update `configs/data_sources.yaml` or drop the CSV into `data/raw/gdsc_raw/` |
+| `no cell line is present in every modality` | identifier harmonisation failed; check that `Cell_Lines_Details.xlsx` is present so names map to COSMIC ids |
+| `no gene set matched the feature universe` | the GMT uses a different symbol namespace than the omics matrix |
+| RDKit missing → hashed n-gram fingerprints | install `rdkit` from conda-forge; LDO results are weaker without it |
+| out of GPU memory | halve `train.batch_size`, then `train.eval_batch_size`; lower `data.max_patches` |
+| out of disk | delete `results/checkpoints/`; drop `data.gdsc_versions` to `[2]` |
 
 ## Citation
 
-If you use this code, please cite:
-
-```
-PathOmicDRP: Integrating Multi-Omics and Histopathology through Cross-Attention
-Networks for Cancer Drug Response Prediction. (2026)
-```
+The encoder follows SurvPath (CVPR 2024), Pathformer (Bioinformatics 2024) and
+DRPreter (IJMS 2022); the naive-baseline normalisation follows DrEval (Nature
+Communications 2026); using Cmax as the clinical-relevance anchor is standard
+pharmacology practice, not a contribution of this work.
 
 ## License
 
-This project is licensed under the MIT License.
-
-
-## Create reports
-```bash
-python src/reinforce_cv_ablation.py
-python src/oof_predictions.py
-python src/extract_embeddings_attention.py
-
-python src/strengthening_analyses.py
-python src/w1w2w3_resolution.py
-python src/strengthening_abc.py
-python src/advanced_analysis.py
-
-python src/reinforce_fair_embedding.py
-python src/reinforce_metabric.py
-python src/reinforce_drug_heterogeneity.py
-python src/create_analysis6_clinical_auc_comparison.py
-python src/clinical_utility_v2.py
-python src/biological_validation.py
-python src/cptac_validation.py
-python src/sota_benchmark.py
-
-python src/reinforce_figures.py
-python src/figures_v8.py
-python -m src.figures_v8_nature.run_all
-
-python src/generate_manuscript_v6.py
-python src/generate_manuscript_v7.py
-python src/patch_v7_discussion.py
-python src/generate_manuscript_v8.py
-```
+MIT — see `LICENSE`.
